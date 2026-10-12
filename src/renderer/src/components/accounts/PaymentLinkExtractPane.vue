@@ -26,7 +26,7 @@ import {
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
-import { formatPrice, runPool, subscriptionLabel } from '@/utils/format'
+import { formatPrice, formatUsd as usd, runPool, subscriptionLabel } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
 import { toPlain } from '@/utils/ipc'
 import { confirmDanger, copyText } from '@/utils/ui'
@@ -146,8 +146,10 @@ onMounted(() => void loadPlans())
 // ============ 优惠条件 ============
 
 /**
- * any：实付低于标价就算有优惠（新用户优惠券）；
- * max：实付不超过给定金额才保留，用于只要某个价位的号。
+ * any：结算页有余额抵扣就算新用户（新号自带 $20 Stripe 余额）；
+ * max：在有抵扣的基础上，今天应付还要不超过给定金额。
+ *
+ * 不能拿「实付 < 标价」判断：首期按到重置日的剩余天数折算，没有优惠的老号实付也会低于标价。
  */
 type DiscountRule = 'any' | 'max' | 'off'
 const savedRule = (() => {
@@ -166,20 +168,20 @@ watch([discountRule, maxAmount], () =>
 
 const ruleText = computed(() => {
   if (discountRule.value === 'off') return '不校验金额，全部保留'
-  if (discountRule.value === 'max') return `只保留实付 ≤ $${maxAmount.value ?? 0} 的`
-  return '只保留实付低于标价的（有新用户优惠）'
+  if (discountRule.value === 'max') return `只保留有新用户抵扣、且今天应付 ≤ $${maxAmount.value ?? 0} 的`
+  return '只保留有新用户余额抵扣的'
 })
 
 /** 按规则判断这条链接要不要；返回 null 表示满足 */
-function rejectReason(price: CheckoutPrice | undefined, target: SubscriptionPlan): string | null {
+function rejectReason(price: CheckoutPrice | undefined): string | null {
   if (discountRule.value === 'off') return null
   if (!price) return '没读到实付金额'
-  const due = price.amountDue
+  if (price.credit <= 0) return `无新用户抵扣（今付 ${usd(price.amountDue)}）`
   if (discountRule.value === 'max') {
     const limit = maxAmount.value ?? 0
-    return due <= limit + 1e-6 ? null : `实付 ${dueText(due, price.currency)}，高于 $${limit}`
+    if (price.amountDue > limit + 1e-6) return `今付 ${usd(price.amountDue)}，高于 $${limit}`
   }
-  return due < target.amount - 1e-6 ? null : `实付 ${dueText(due, price.currency)}，无优惠`
+  return null
 }
 
 // ============ 范围与数量 ============
@@ -305,13 +307,9 @@ function revealRow(index: number): void {
   target?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 }
 
-/** formatPrice 把 0 写成「免费」，实付金额这里要的是 $0 */
-function dueText(amount: number, currency: string): string {
-  return amount <= 0 ? (currency === 'USD' ? '$0' : `0 ${currency}`) : formatPrice(amount, currency)
-}
-
-function priceLabel(price: CheckoutPrice, target: SubscriptionPlan): string {
-  return `实付 ${dueText(price.amountDue, price.currency)}（标价 ${formatPrice(target.amount, target.currency)}）`
+function priceLabel(price: CheckoutPrice): string {
+  const credit = price.credit > 0 ? ` − 抵扣 ${usd(price.credit)}` : ''
+  return `今付 ${usd(price.amountDue)}（首期 ${usd(price.subtotal)}${credit}）`
 }
 
 async function extractOne(row: Row, target: SubscriptionPlan, index: number): Promise<void> {
@@ -333,9 +331,9 @@ async function extractOne(row: Row, target: SubscriptionPlan, index: number): Pr
       row.error = `已有订阅（${subscriptionLabel(account.subscription)}），接口只返回账单管理链接`
       return
     }
-    if (price) row.priceText = priceLabel(price, target)
+    if (price) row.priceText = priceLabel(price)
 
-    const reason = rejectReason(price, target)
+    const reason = rejectReason(price)
     if (reason) {
       row.state = price ? 'skip' : 'fail'
       row.error = price ? reason : `${reason}：${priceError || '未知原因'}`
@@ -345,7 +343,7 @@ async function extractOne(row: Row, target: SubscriptionPlan, index: number): Pr
           subscriptionType: target.subscriptionType,
           planTitle: target.title,
           amountDue: price.amountDue,
-          currency: price.currency,
+          credit: price.credit,
           checkedAt: Date.now()
         })
       }
@@ -359,6 +357,8 @@ async function extractOne(row: Row, target: SubscriptionPlan, index: number): Pr
       amount: target.amount,
       currency: target.currency,
       amountDue: price?.amountDue,
+      credit: price?.credit,
+      subtotal: price?.subtotal,
       createdAt: Date.now()
     })
     row.state = 'ok'
@@ -530,8 +530,10 @@ function tierOf(row: Row): string {
         </div>
         <div class="rule-row">
           <a-radio-group v-model:value="discountRule">
-            <a-radio value="any">有新用户优惠（实付低于标价）</a-radio>
-            <a-radio value="max">实付不超过</a-radio>
+            <a-radio value="any">有新用户抵扣（$20 余额）</a-radio>
+            <a-tooltip title="首期按到账号重置日的剩余天数折算，剩余天数越多今天要付的越多，所以同是新号金额也会不同">
+              <a-radio value="max">有抵扣且今天应付不超过</a-radio>
+            </a-tooltip>
           </a-radio-group>
           <a-input-number
             v-model:value="maxAmount"
@@ -617,7 +619,7 @@ function tierOf(row: Row): string {
       <a-alert
         type="info"
         show-icon
-        message="逐个生成 Stripe 结算链接并读取实付金额，满足优惠条件的才保存并标记为「待付款」；不满足的记为「无优惠」，下次默认跳过。订阅档位以最近一次刷新用量为准，刚付款的账号请先在「提取记录」里刷新订阅状态。Stripe 结算链接通常 24 小时内有效。"
+        message="逐个生成 Stripe 结算链接并读取结算页金额（统一换算成美元）。新号的优惠是 Stripe 余额里的 $20，从首期扣；首期按到重置日的剩余天数折算，例如 Pro+ 剩 20 天时首期 $24.93，扣完今天付 $4.93，之后每月 $40。满足条件的才保存并标记为「待付款」，不满足的记为「无优惠」，下次默认跳过。Stripe 结算链接通常 24 小时内有效。"
       />
 
       <div class="footer">

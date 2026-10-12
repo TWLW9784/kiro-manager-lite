@@ -4,7 +4,7 @@
 // Excel 前三列与复制出来的每一行都是这个顺序，其余信息排在后面。
 import { isPaymentLinkStale, paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
 import type { Account, AccountGroup, XlsxSheet } from '@shared/types'
-import { PAYMENT_LINK_META, formatPrice, subscriptionLabel } from './format'
+import { PAYMENT_LINK_META, formatPrice, formatUsd, subscriptionLabel } from './format'
 import { exportStamp } from './transfer'
 
 /** 付款状态文案：待付款且超过 24 小时的额外标注可能过期 */
@@ -15,10 +15,10 @@ export function paymentStateText(account: Account, nowMs = Date.now()): string {
   return state === 'pending' && link && isPaymentLinkStale(link, nowMs) ? `${text}（可能已过期）` : text
 }
 
-/** 实付金额文案：查到了显示实付，没查到退回标价并注明 */
+/** 今天应付文案：查到了显示实付（USD），没查到退回标价并注明 */
 export function amountDueText(link: NonNullable<Account['paymentLink']>): string {
   if (link.amountDue === undefined) return `${formatPrice(link.amount, link.currency)}（标价）`
-  return link.amountDue <= 0 ? '$0' : formatPrice(link.amountDue, link.currency)
+  return `今付 ${formatUsd(link.amountDue)}`
 }
 
 /**
@@ -38,8 +38,9 @@ export function buildPaymentLinkSheet(accounts: Account[], groups: AccountGroup[
         paymentLinkTier(link),
         link.url,
         link.amountDue ?? null,
+        link.credit ?? null,
+        link.subtotal ?? null,
         link.amount,
-        link.currency,
         link.createdAt,
         paymentStateText(account, nowMs),
         subscriptionLabel(account.subscription),
@@ -56,9 +57,10 @@ export function buildPaymentLinkSheet(accounts: Account[], groups: AccountGroup[
       { title: '邮箱', width: 32 },
       { title: '订阅等级', width: 10 },
       { title: '支付链接', width: 80 },
-      { title: '实付金额', width: 10, format: 'number', decimals: 2 },
-      { title: '标价', width: 9, format: 'number', decimals: 2 },
-      { title: '币种', width: 7 },
+      { title: '今天应付(USD)', width: 13, format: 'number', decimals: 2 },
+      { title: '新用户抵扣(USD)', width: 15, format: 'number', decimals: 2 },
+      { title: '首期金额(USD)', width: 13, format: 'number', decimals: 2 },
+      { title: '月费标价(USD)', width: 13, format: 'number', decimals: 2 },
       { title: '提取时间', width: 20, format: 'datetime' },
       { title: '付款状态', width: 16 },
       { title: '当前订阅', width: 14 },

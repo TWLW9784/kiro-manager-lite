@@ -158,15 +158,29 @@ export interface SubscriptionCheckout {
   priceError?: string
 }
 
-/** Stripe Checkout Session 上的金额，单位为元（不是美分） */
+/**
+ * Stripe Checkout Session 上的金额，统一换算成美元（元，不是美分）。
+ *
+ * 实测（2026-10，新 Builder ID 账号，Pro+ 标价 $40）：
+ * - 首期按到账号重置日的剩余天数折算（proration），20 天剩余时是 $24.93；
+ * - 新用户优惠不是优惠券，而是 Stripe 客户余额里预置的 $20（total_summary.applied_balance = -2000），
+ *   直接从首期里扣，于是今天应付 $4.93；
+ * - 国内 IP 打开时 Stripe 自动按人民币展示（Adaptive Pricing），金额字段都是 CNY，
+ *   要用 adaptive_pricing_info 里的汇率换回美元。
+ * 所以「有没有新用户优惠」看 credit，不能拿 amountDue 和标价比——折算本身就会让它低于标价。
+ */
 export interface CheckoutPrice {
-  /** 今天应付（已扣优惠） */
+  /** 今天应付（已扣余额与折扣），USD */
   amountDue: number
-  /** 优惠前小计；Stripe 没给时为空 */
-  subtotal?: number
-  currency: string
-  /** 金额取自响应的哪个字段，排查结构变化用 */
-  source: string
+  /** 首期金额（折算后、抵扣前），USD */
+  subtotal: number
+  /** 余额抵扣 + 折扣合计，USD；新用户优惠体现在这里，没有优惠为 0 */
+  credit: number
+  /** 之后每期的续费金额，USD；拿不到时为空 */
+  recurring?: number
+  /** 结算页实际展示的币种与应付金额（如 CNY 34.31） */
+  presentmentCurrency: string
+  presentmentDue: number
 }
 
 /**
@@ -176,8 +190,10 @@ export interface CheckoutPrice {
 export interface AccountDiscountCheck {
   subscriptionType: string
   planTitle: string
+  /** 今天应付，USD */
   amountDue: number
-  currency: string
+  /** 余额抵扣，USD；0 表示没有新用户优惠 */
+  credit: number
   checkedAt: number
 }
 
@@ -195,8 +211,12 @@ export interface AccountPaymentLink {
   /** 档位标价 */
   amount: number
   currency: string
-  /** Stripe 结算页上的实付金额（已扣优惠）；没查到时为空 */
+  /** Stripe 结算页上今天应付的金额（USD，已扣新用户余额）；没查到时为空 */
   amountDue?: number
+  /** 新用户余额抵扣金额（USD）；没查到时为空 */
+  credit?: number
+  /** 首期金额（USD，按剩余天数折算、抵扣前） */
+  subtotal?: number
   /** 提取时间戳（ms） */
   createdAt: number
 }

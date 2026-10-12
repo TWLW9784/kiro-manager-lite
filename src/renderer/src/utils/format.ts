@@ -222,6 +222,11 @@ export function formatPrice(amount: number, currency: string): string {
   return currency === 'USD' ? `$${amount}` : `${amount} ${currency}`
 }
 
+/** 美元金额，保留到分：$4.93、$0.00；结算页金额都已换算成美元 */
+export function formatUsd(amount: number): string {
+  return `$${amount.toFixed(2)}`
+}
+
 /** API Key 的检查状态：卡片标签与筛选 chip 共用 */
 export const KEY_STATUS_META: Record<KeyStatus, { text: string; color: string }> = {
   normal: { text: '正常', color: 'green' },
