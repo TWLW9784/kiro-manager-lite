@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   HomeOutlined,
   TeamOutlined,
+  CreditCardOutlined,
   KeyOutlined,
   CloudServerOutlined,
   ToolOutlined,
@@ -54,6 +55,7 @@ const items = computed(() => [
     label: accountCount.value ? `账户管理（${accountCount.value}个）` : '账户管理',
     icon: TeamOutlined
   },
+  { key: 'subscriptions', label: '新订阅管理', icon: CreditCardOutlined },
   {
     key: 'keys',
     label: keysStore.count ? `API Key 管理（${keysStore.count}个）` : 'API Key 管理',

@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import DateRangeFilter from '@/components/common/DateRangeFilter.vue'
 import { useAccountsStore } from '@/stores/accounts'
-import { IDP_META, STATUS_META, SUBSCRIPTION_META } from '@/utils/format'
+import { IDP_META, PAYMENT_LINK_META, STATUS_META, SUBSCRIPTION_META } from '@/utils/format'
+import type { PaymentLinkState } from '@shared/paymentLink'
 import type { AccountStatus, IdpType, SubscriptionType } from '@shared/types'
 
 const accountsStore = useAccountsStore()
@@ -31,6 +32,9 @@ const statusChips = computed(() =>
   buildChips<AccountStatus>(STATUS_META, accountsStore.stats.byStatus)
 )
 const idpChips = computed(() => buildChips<IdpType>(IDP_META, accountsStore.stats.byIdp))
+const paymentChips = computed(() =>
+  buildChips<PaymentLinkState>(PAYMENT_LINK_META, accountsStore.stats.byPaymentState)
+)
 
 /**
  * 数字输入框都要经过中转再写进筛选条件。
@@ -78,6 +82,9 @@ function toggleStatus(value: AccountStatus): void {
 }
 function toggleIdp(value: IdpType): void {
   filter.value.idps = toggle(filter.value.idps, value)
+}
+function togglePayment(value: PaymentLinkState): void {
+  filter.value.paymentStates = toggle(filter.value.paymentStates, value)
 }
 
 /** 导入时间范围：控件给的是精确到秒的时间戳，这里只负责写回筛选条件 */
@@ -132,6 +139,21 @@ function reset(): void {
           class="chip"
           :class="{ on: filter.idps.includes(item.key), empty: !item.count }"
           @click="toggleIdp(item.key)"
+        >
+          {{ item.label }}<span class="chip-count">({{ item.count }})</span>
+        </button>
+      </div>
+    </div>
+
+    <div class="filter-row">
+      <span class="filter-label">支付链接</span>
+      <div class="chips">
+        <button
+          v-for="item in paymentChips"
+          :key="item.key"
+          class="chip"
+          :class="{ on: filter.paymentStates.includes(item.key), empty: !item.count }"
+          @click="togglePayment(item.key)"
         >
           {{ item.label }}<span class="chip-count">({{ item.count }})</span>
         </button>

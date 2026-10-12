@@ -138,6 +138,69 @@ export interface SubscriptionEntry {
   disclaimer: string[]
 }
 
+/** 可开通档位列表（批量提取支付链接前选档位用） */
+export interface SubscriptionPlanList {
+  plans: SubscriptionPlan[]
+  disclaimer: string[]
+}
+
+/**
+ * 生成结算链接的结果。
+ * 未订阅账号拿到 checkout.stripe.com 的结算链接；已订阅账号接口仍回 200，
+ * 但给的是 billing.stripe.com 的账单管理链接，批量提取要据此把它当「已订阅」跳过。
+ */
+export interface SubscriptionCheckout {
+  url: string
+  kind: 'checkout' | 'manage'
+  /** 从 Stripe 结算页读到的实付金额（含新用户优惠）；只有 probePrice 时才查 */
+  price?: CheckoutPrice
+  /** 查实付金额失败的原因；链接本身仍然可用 */
+  priceError?: string
+}
+
+/** Stripe Checkout Session 上的金额，单位为元（不是美分） */
+export interface CheckoutPrice {
+  /** 今天应付（已扣优惠） */
+  amountDue: number
+  /** 优惠前小计；Stripe 没给时为空 */
+  subtotal?: number
+  currency: string
+  /** 金额取自响应的哪个字段，排查结构变化用 */
+  source: string
+}
+
+/**
+ * 查过实付金额、但不满足优惠条件而没有保存链接的账号，记一笔，
+ * 下次批量提取默认跳过，不必再为它生成一次结算链接。
+ */
+export interface AccountDiscountCheck {
+  subscriptionType: string
+  planTitle: string
+  amountDue: number
+  currency: string
+  checkedAt: number
+}
+
+/**
+ * 账号上记下的支付链接：提取过就算「已标记」。
+ * 付款与否不在这里存，靠刷新用量拿到的最新订阅档位与 subscriptionType 比对得出，
+ * 这样刷新一次用量 / 积分，标记状态就自然跟着更新。
+ */
+export interface AccountPaymentLink {
+  url: string
+  /** 下单的订阅类型，如 Q_DEVELOPER_STANDALONE_PRO_PLUS */
+  subscriptionType: string
+  /** 档位展示名，如 KIRO PRO+ */
+  planTitle: string
+  /** 档位标价 */
+  amount: number
+  currency: string
+  /** Stripe 结算页上的实付金额（已扣优惠）；没查到时为空 */
+  amountDue?: number
+  /** 提取时间戳（ms） */
+  createdAt: number
+}
+
 /** 账号实体 */
 export interface Account {
   id: string
@@ -159,6 +222,10 @@ export interface Account {
   createdAt: number
   lastUsedAt: number
   lastCheckedAt?: number
+  /** 最近一次提取的支付链接；没提取过为空 */
+  paymentLink?: AccountPaymentLink
+  /** 最近一次查到「没有新用户优惠」的记录；有优惠或没查过为空 */
+  discountCheck?: AccountDiscountCheck
 }
 
 /**

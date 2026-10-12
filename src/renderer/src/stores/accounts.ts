@@ -6,6 +6,8 @@ import {
   type Account,
   type AccountExportData,
   type AccountGroup,
+  type AccountDiscountCheck,
+  type AccountPaymentLink,
   type AccountImportItem,
   type AccountSnapshot,
   type AccountStatus,
@@ -20,6 +22,7 @@ import {
 } from '@shared/types'
 import { errorMessage, isCredentialRejected } from '@shared/errors'
 import { shouldSkipAccountUsageRefresh } from '@shared/refreshPolicy'
+import { paymentLinkState, type PaymentLinkState } from '@shared/paymentLink'
 import { DEFAULT_REGION } from '@shared/regions'
 import { runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
@@ -46,6 +49,8 @@ export interface AccountFilter {
    */
   createdFrom?: number
   createdTo?: number
+  /** 支付链接标记状态（未提取 / 待付款 / 已开通 / 其他档位），空数组不限 */
+  paymentStates: PaymentLinkState[]
   /**
    * 按分组筛选。空数组表示不限；特殊值 __none__ 代表「未分组」，
    * 这样「未分组」能和普通分组一样被勾选，不必再加一个布尔开关。
@@ -111,6 +116,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     statuses: [],
     subscriptions: [],
     idps: [],
+    paymentStates: [],
     groupIds: []
   })
 
@@ -285,6 +291,7 @@ export const useAccountsStore = defineStore('accounts', () => {
       usageMax,
       createdFrom,
       createdTo,
+      paymentStates,
       groupIds
     } = filter.value
     const keyword = search.trim().toLowerCase()
@@ -317,6 +324,7 @@ export const useAccountsStore = defineStore('accounts', () => {
       // 导入时间：两端都含，界面给过来的是精确到秒的时刻
       if (createdFrom != null && a.createdAt < createdFrom) return false
       if (createdTo != null && a.createdAt > createdTo) return false
+      if (paymentStates.length && !paymentStates.includes(paymentLinkState(a))) return false
       return true
     })
   })
@@ -334,6 +342,7 @@ export const useAccountsStore = defineStore('accounts', () => {
       statuses: [],
       subscriptions: [],
       idps: [],
+      paymentStates: [],
       groupIds: filter.value.groupIds,
       daysRemainingMin: undefined,
       daysRemainingMax: undefined,
@@ -364,6 +373,7 @@ export const useAccountsStore = defineStore('accounts', () => {
       Student: 0
     }
     const byIdp: Record<IdpType, number> = { BuilderId: 0, Github: 0, Google: 0, Enterprise: 0 }
+    const byPaymentState: Record<PaymentLinkState, number> = { none: 0, pending: 0, paid: 0, other: 0 }
     let expiringSoon = 0
 
     for (const a of accounts.value) {
@@ -371,10 +381,18 @@ export const useAccountsStore = defineStore('accounts', () => {
       byStatus[a.status] = (byStatus[a.status] ?? 0) + 1
       bySubscription[a.subscription.type] = (bySubscription[a.subscription.type] ?? 0) + 1
       byIdp[a.idp] = (byIdp[a.idp] ?? 0) + 1
+      byPaymentState[paymentLinkState(a)]++
       if ((a.subscription.daysRemaining ?? 99) <= EXPIRING_SOON_DAYS) expiringSoon++
     }
 
-    return { total: accounts.value.length, byStatus, bySubscription, byIdp, expiringSoon }
+    return {
+      total: accounts.value.length,
+      byStatus,
+      bySubscription,
+      byIdp,
+      byPaymentState,
+      expiringSoon
+    }
   })
 
   // ============ 增删改 ============
@@ -515,6 +533,68 @@ export const useAccountsStore = defineStore('accounts', () => {
       persist()
     }
     return changed
+  }
+
+  /** 记下提取到的支付链接；同一账号重复提取直接覆盖成最新一条，并清掉「无优惠」记录 */
+  function setPaymentLink(id: string, link: AccountPaymentLink): void {
+    updateAccount(id, { paymentLink: link, discountCheck: undefined })
+  }
+
+  /** 记下「查过实付金额、没有优惠」，下次批量提取默认跳过 */
+  function setDiscountCheck(id: string, check: AccountDiscountCheck): void {
+    updateAccount(id, { discountCheck: check })
+  }
+
+  /** 清掉「无优惠」记录，让这些账号重新进入候选（比如优惠规则变了想再查一遍） */
+  function clearDiscountChecks(ids?: string[]): number {
+    const target = ids ? new Set(ids) : null
+    let changed = 0
+    const next = accounts.value.map((account) => {
+      if (!account.discountCheck || (target && !target.has(account.id))) return account
+      changed++
+      return { ...account, discountCheck: undefined }
+    })
+    if (changed) {
+      accounts.value = next
+      persist(true)
+    }
+    return changed
+  }
+
+  /**
+   * 批量清除支付链接标记，一次换引用 + 单次写盘。
+   * @returns 实际清掉的账号数
+   */
+  function clearPaymentLinks(ids: string[]): number {
+    const target = new Set(ids)
+    let changed = 0
+    const next = accounts.value.map((account) => {
+      if (!target.has(account.id) || !account.paymentLink) return account
+      changed++
+      return { ...account, paymentLink: undefined }
+    })
+    if (changed) {
+      accounts.value = next
+      persist(true)
+    }
+    return changed
+  }
+
+  /**
+   * 取一份 accessToken 至少还剩 1 分钟的账号副本，不够就先刷新一次。
+   *
+   * 门户的订阅接口靠 cookie 里的 AccessToken 认身份，过期就是 401，且不像用量接口那样会自动续；
+   * 非 IDE 当前登录的账号缓存里那份基本都过期了，所以调用订阅接口前统一走这里。
+   */
+  async function freshAccount(id: string): Promise<Account> {
+    const current = get(id)
+    if (!current) throw new Error('账号不存在')
+    if (current.credentials.accessToken && (current.credentials.expiresAt ?? 0) - Date.now() > 60_000) {
+      return current
+    }
+    const res = await refreshToken(id)
+    if (!res.ok) throw new Error(`刷新密钥失败：${res.error}`)
+    return get(id) ?? current
   }
 
   async function removeAccounts(
@@ -1269,6 +1349,12 @@ export const useAccountsStore = defineStore('accounts', () => {
     addByOnlineLogin,
     updateAccount,
     setNoteForAccounts,
+    // 支付链接
+    setPaymentLink,
+    setDiscountCheck,
+    clearDiscountChecks,
+    clearPaymentLinks,
+    freshAccount,
     // 分组
     groups,
     groupMap,

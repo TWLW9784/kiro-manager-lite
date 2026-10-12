@@ -1,4 +1,5 @@
 import type { AccountStatus, IdpType, KeyStatus, SubscriptionType } from '@shared/types'
+import type { PaymentLinkState } from '@shared/paymentLink'
 
 /** 打码结果缓存：账号多、重渲染频繁，避免反复算 md5 */
 const maskedEmailCache = new Map<string, string>()
@@ -205,6 +206,20 @@ export function subscriptionLabel(subscription: {
   title?: string
 }): string {
   return subscription.title || subscriptionMeta(subscription.type).text
+}
+
+/** 支付链接标记：卡片标签、筛选 chip、批量提取弹窗共用 */
+export const PAYMENT_LINK_META: Record<PaymentLinkState, { text: string; color: string }> = {
+  none: { text: '未提取', color: 'default' },
+  pending: { text: '待付款', color: 'orange' },
+  paid: { text: '已开通', color: 'green' },
+  other: { text: '其他档位', color: 'blue' }
+}
+
+/** 金额文案：USD 写成 $20，其余币种把代码挂在后面 */
+export function formatPrice(amount: number, currency: string): string {
+  if (amount <= 0) return '免费'
+  return currency === 'USD' ? `$${amount}` : `${amount} ${currency}`
 }
 
 /** API Key 的检查状态：卡片标签与筛选 chip 共用 */

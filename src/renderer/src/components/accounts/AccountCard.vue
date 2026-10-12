@@ -4,6 +4,7 @@ import {
   CalendarOutlined,
   ClockCircleOutlined,
   CopyOutlined,
+  CreditCardOutlined,
   DeleteOutlined,
   EditOutlined,
   GlobalOutlined,
@@ -18,18 +19,22 @@ import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import {
   IDP_META,
+  PAYMENT_LINK_META,
   STATUS_META,
   subscriptionMeta,
   formatCheckedAt,
   formatCreditsPair,
   formatDate,
   formatDateTime,
+  formatPrice,
   subscriptionLabel,
   tokenLife,
   usageColor
 } from '@/utils/format'
 import { displayEmail, displayName, displayNote } from '@/utils/display'
 import { now } from '@/utils/now'
+import { copyText } from '@/utils/ui'
+import { isPaymentLinkStale, paymentLinkState } from '@shared/paymentLink'
 import type { Account, AccountDisplayMode } from '@shared/types'
 
 const props = withDefaults(
@@ -120,6 +125,31 @@ const subscription = computed(() => subscriptionMeta(props.account.subscription.
 const subscriptionText = computed(() => subscriptionLabel(props.account.subscription))
 
 const daysRemaining = computed(() => props.account.subscription.daysRemaining)
+
+/** 支付链接标记：没提取过返回 null，标签不显示 */
+const payment = computed(() => {
+  const link = props.account.paymentLink
+  if (!link) return null
+  const state = paymentLinkState(props.account)
+  const meta = PAYMENT_LINK_META[state]
+  const stale = state === 'pending' && isPaymentLinkStale(link, now.value)
+  const lines = [
+    `目标档位：${link.planTitle}（${formatPrice(link.amount, link.currency)}）`,
+    `提取于 ${formatDateTime(link.createdAt)}`,
+    stale ? '已超过 24 小时，链接可能已失效，建议重新提取' : '',
+    '点击复制支付链接'
+  ]
+  return {
+    text: stale ? `${meta.text}·可能过期` : meta.text,
+    color: stale ? 'default' : meta.color,
+    tips: lines.filter(Boolean)
+  }
+})
+
+function copyPaymentLink(): void {
+  const url = props.account.paymentLink?.url
+  if (url) copyText(url, '支付链接已复制到剪贴板')
+}
 
 /** 订阅到期时间：优先订阅字段，回退到用量重置日期 */
 const expiryDate = computed(() =>
@@ -315,6 +345,18 @@ function onCardClick(): void {
         </span>
       </a-tooltip>
       <a-tag :color="idp.color" :bordered="false">{{ idp.text }}</a-tag>
+      <!-- 支付链接标记：提取过才显示；点一下复制链接，悬停看目标档位与提取时间 -->
+      <a-tooltip v-if="payment">
+        <template #title>
+          <div v-for="line in payment.tips" :key="line">{{ line }}</div>
+        </template>
+        <span class="payment-tag" @click.stop="copyPaymentLink">
+          <a-tag :color="payment.color" :bordered="false">
+            <CreditCardOutlined />
+            {{ payment.text }}
+          </a-tag>
+        </span>
+      </a-tooltip>
       <!-- 分组标签：没分组就不显示，避免每张卡都多一个空标签 -->
       <a-tag
         v-if="groupName"
@@ -577,8 +619,16 @@ function onCardClick(): void {
   font-size: 12px;
 }
 
-.subscription-tag:hover {
+.subscription-tag:hover,
+.payment-tag:hover {
   filter: brightness(0.94);
+}
+
+/* 支付链接标记同样可点（复制链接），手感与订阅标签一致 */
+.payment-tag {
+  display: inline-flex;
+  cursor: pointer;
+  transition: filter 0.15s;
 }
 
 .usage-block {

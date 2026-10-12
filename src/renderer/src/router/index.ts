@@ -17,6 +17,12 @@ const router = createRouter({
       meta: { title: '账户管理' }
     },
     {
+      path: '/subscriptions',
+      name: 'subscriptions',
+      component: () => import('@/views/SubscriptionsView.vue'),
+      meta: { title: '新订阅管理' }
+    },
+    {
       path: '/keys',
       name: 'keys',
       component: () => import('@/views/KeysView.vue'),

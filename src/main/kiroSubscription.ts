@@ -19,7 +19,15 @@ import { encode, decode } from 'cbor-x'
 import { KIRO_PORTAL_BASE, KIRO_PORTAL_ORIGIN } from './kiroEndpoints'
 import { httpRequest } from './net'
 import { inAppChromeUserAgent } from './kiroPortal'
-import type { Account, SubscriptionEntry, SubscriptionPlan } from '../shared/types'
+import { isManageUrl } from '../shared/paymentLink'
+import { probeCheckoutPrice } from './stripeCheckout'
+import type {
+  Account,
+  SubscriptionCheckout,
+  SubscriptionEntry,
+  SubscriptionPlan,
+  SubscriptionPlanList
+} from '../shared/types'
 
 /** 一次 CSRF 会话：token 与它配对的 cookie 串 */
 interface PortalCsrfSession {
@@ -167,11 +175,29 @@ export async function getSubscriptionEntry(account: Account): Promise<Subscripti
   return { plans: parsePlans(res.subscriptionPlans), disclaimer: res.disclaimer ?? [] }
 }
 
-/** 为指定档位生成 Stripe 结算链接 */
+/**
+ * 只查可开通档位，不碰账单管理链接。
+ * 批量提取前选档位用：档位列表与账号无关，任取一个凭证有效的账号问一次即可。
+ */
+export async function getSubscriptionPlans(account: Account): Promise<SubscriptionPlanList> {
+  const session = await openCsrfSession(account)
+  const res = await csrfOperation<{ subscriptionPlans?: RawPlan[]; disclaimer?: string[] }>(
+    'GetAvailableSubscriptionPlans',
+    {},
+    session
+  )
+  return { plans: parsePlans(res.subscriptionPlans), disclaimer: res.disclaimer ?? [] }
+}
+
+/**
+ * 为指定档位生成 Stripe 结算链接。
+ * 已订阅账号接口照样 200，但给的是账单管理链接，用 kind 区分开，由调用方决定怎么处理。
+ */
 export async function createSubscriptionCheckout(
   account: Account,
-  subscriptionType: string
-): Promise<{ url: string }> {
+  subscriptionType: string,
+  options: { probePrice?: boolean } = {}
+): Promise<SubscriptionCheckout> {
   if (!subscriptionType) throw new Error('缺少订阅类型')
   const session = await openCsrfSession(account)
   const res = await csrfOperation<{ encodedVerificationUrl?: string }>(
@@ -179,6 +205,15 @@ export async function createSubscriptionCheckout(
     { subscriptionType },
     session
   )
-  if (!res.encodedVerificationUrl) throw new Error('接口没有返回支付链接')
-  return { url: res.encodedVerificationUrl }
+  const url = res.encodedVerificationUrl
+  if (!url) throw new Error('接口没有返回支付链接')
+  const kind = isManageUrl(url) ? 'manage' : 'checkout'
+  if (!options.probePrice || kind !== 'checkout') return { url, kind }
+
+  // 查金额失败不影响链接本身，原因带回去由界面决定保留还是丢弃
+  try {
+    return { url, kind, price: await probeCheckoutPrice(url) }
+  } catch (error) {
+    return { url, kind, priceError: error instanceof Error ? error.message : String(error) }
+  }
 }

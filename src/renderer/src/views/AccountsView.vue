@@ -145,6 +145,7 @@ const activeFilterCount = computed(() => {
     f.statuses.length +
     f.subscriptions.length +
     f.idps.length +
+    f.paymentStates.length +
     // 分组筛选另有独立按钮与角标，这里不重复计入，只在「清除筛选」时一并清掉
     // != null：输入框清空时给的是 null，按 !== undefined 判断会把它算成一个生效条件
     (f.usageMin != null ? 1 : 0) +

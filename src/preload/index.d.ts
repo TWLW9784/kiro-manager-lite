@@ -57,7 +57,9 @@ import type {
   LogQuery,
   LogQueryResult,
   ProactiveRenewalPayload,
+  SubscriptionCheckout,
   SubscriptionEntry,
+  SubscriptionPlanList,
   SwitchAccountInput,
   SwitchAccountResult,
   TrayAction,
@@ -160,8 +162,12 @@ export interface Api {
   /** 为指定档位生成 Stripe 结算链接 */
   createSubscriptionCheckout: (
     account: Account,
-    subscriptionType: string
-  ) => Promise<IpcResult<{ url: string }>>
+    subscriptionType: string,
+    /** probePrice：顺带读 Stripe 结算页的实付金额（判断新用户优惠） */
+    options?: { probePrice?: boolean }
+  ) => Promise<IpcResult<SubscriptionCheckout>>
+  /** 只查可开通档位（批量提取支付链接选档位用） */
+  getSubscriptionPlans: (account: Account) => Promise<IpcResult<SubscriptionPlanList>>
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) => Promise<IpcResult<{ url: string }>>
 
