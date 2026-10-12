@@ -72,8 +72,12 @@ const features = [
   { name: '桌面端体验', desc: '系统托盘常驻、关闭行为可配、自定义协议唤起、单实例锁' }
 ]
 
-/** 本项目仓库地址，头部按钮与检查更新指向同一个仓库 */
-const REPO_URL = 'https://github.com/lucks-cloud/kiro-manager-lite'
+/**
+ * 本项目仓库地址，头部按钮与检查更新指向同一个仓库。
+ * 这是带「新订阅管理」的分支版本，指向自己的仓库：指回上游的话，
+ * 上游一发新版就会提示去装上游的包，装完新订阅管理就没了。
+ */
+const REPO_URL = 'https://github.com/TWLW9784/kiro-manager-lite'
 
 const author = {
   name: 'lucks-cloud',

@@ -4,7 +4,12 @@ import { httpRequest } from './net'
 import { sleep } from './utils'
 import type { UpdateCheckResult } from '../shared/types'
 
-const REPO = 'lucks-cloud/kiro-manager-lite'
+/**
+ * 更新源：带「新订阅管理」的分支仓库，不是上游 lucks-cloud/kiro-manager-lite。
+ * 上游的安装包不含新订阅管理，指向上游会提示「有新版本」并引导覆盖安装。
+ * 在本仓库推送 v* 标签，Release 工作流会打包发布，这里就能检查到。
+ */
+const REPO = 'TWLW9784/kiro-manager-lite'
 const LATEST_API = `https://api.github.com/repos/${REPO}/releases/latest`
 const LATEST_PAGE = `https://github.com/${REPO}/releases/latest`
 /** 「前往更新」统一落到 Releases 列表页，方便用户自己挑平台安装包与历史版本 */
@@ -124,9 +129,8 @@ async function checkViaApi(current: string): Promise<UpdateCheckResult> {
   })
 
   if (!res.ok) {
-    if (res.status === 404) {
-      throw new UpdateSourceError('仓库还没有发布任何版本', false, false)
-    }
+    // 仓库还没发过 Release：没有比当前更新的版本，按「已是最新」处理，不当成故障报给用户
+    if (res.status === 404) return resultOf(current, current)
     if (res.status === 403) {
       throw new UpdateSourceError('GitHub 接口访问频率受限', false)
     }
@@ -156,7 +160,7 @@ async function checkViaReleasePage(current: string): Promise<UpdateCheckResult> 
     timeoutMs: 12_000
   })
   if (!res.ok) {
-    if (res.status === 404) throw new Error('仓库还没有发布任何版本')
+    if (res.status === 404) return resultOf(current, current)
     throw new Error(`GitHub Releases 页面返回 ${res.status}`)
   }
 
