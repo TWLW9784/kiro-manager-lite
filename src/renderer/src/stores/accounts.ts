@@ -13,6 +13,7 @@ import {
   type AccountStatus,
   type AccountStoreData,
   type BatchResult,
+  type CheckoutSessionStatus,
   type IdpType,
   type OnlineLoginCredentials,
   type ProactiveRenewalPayload,
@@ -373,7 +374,13 @@ export const useAccountsStore = defineStore('accounts', () => {
       Student: 0
     }
     const byIdp: Record<IdpType, number> = { BuilderId: 0, Github: 0, Google: 0, Enterprise: 0 }
-    const byPaymentState: Record<PaymentLinkState, number> = { none: 0, pending: 0, paid: 0, other: 0 }
+    const byPaymentState: Record<PaymentLinkState, number> = {
+      none: 0,
+      pending: 0,
+      expired: 0,
+      paid: 0,
+      other: 0
+    }
     let expiringSoon = 0
 
     for (const a of accounts.value) {
@@ -538,6 +545,27 @@ export const useAccountsStore = defineStore('accounts', () => {
   /** 记下提取到的支付链接；同一账号重复提取直接覆盖成最新一条，并清掉「无优惠」记录 */
   function setPaymentLink(id: string, link: AccountPaymentLink): void {
     updateAccount(id, { paymentLink: link, discountCheck: undefined })
+  }
+
+  /**
+   * 批量写回 Stripe 结算会话状态，一次换引用 + 单次写盘。
+   * 只改 url 对得上的那条：查询期间账号被重新提取过的话，新链接不能被旧状态覆盖。
+   */
+  function setStripeStatuses(updates: { id: string; url: string; status: CheckoutSessionStatus }[]): void {
+    if (!updates.length) return
+    const byId = new Map(updates.map((u) => [u.id, u]))
+    const checkedAt = Date.now()
+    let changed = false
+    const next = accounts.value.map((account) => {
+      const update = byId.get(account.id)
+      if (!update || account.paymentLink?.url !== update.url) return account
+      changed = true
+      return { ...account, paymentLink: { ...account.paymentLink, stripeStatus: update.status, stripeCheckedAt: checkedAt } }
+    })
+    if (changed) {
+      accounts.value = next
+      persist()
+    }
   }
 
   /** 记下「查过实付金额、没有优惠」，下次批量提取默认跳过 */
@@ -1351,6 +1379,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     setNoteForAccounts,
     // 支付链接
     setPaymentLink,
+    setStripeStatuses,
     setDiscountCheck,
     clearDiscountChecks,
     clearPaymentLinks,

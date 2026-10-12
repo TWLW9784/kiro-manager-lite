@@ -18,6 +18,7 @@ const extracting = ref(false)
 const freeCount = computed(() => accountsStore.stats.bySubscription.Free)
 const pendingCount = computed(() => accountsStore.stats.byPaymentState.pending)
 const paidCount = computed(() => accountsStore.stats.byPaymentState.paid)
+const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
 </script>
 
 <template>
@@ -37,6 +38,7 @@ const paidCount = computed(() => accountsStore.stats.byPaymentState.paid)
       <span class="spacer" />
       <a-tag :bordered="false">Free {{ freeCount }}</a-tag>
       <a-tag color="orange" :bordered="false">待付款 {{ pendingCount }}</a-tag>
+      <a-tag v-if="expiredCount" :bordered="false">已失效 {{ expiredCount }}</a-tag>
       <a-tag color="green" :bordered="false">已开通 {{ paidCount }}</a-tag>
     </div>
 
@@ -46,7 +48,7 @@ const paidCount = computed(() => accountsStore.stats.byPaymentState.paid)
         @running="(value) => (extracting = value)"
         @show-records="tab = 'records'"
       />
-      <PaymentLinkRecordsPane v-show="tab === 'records'" />
+      <PaymentLinkRecordsPane v-show="tab === 'records'" :active="tab === 'records'" />
     </div>
   </div>
 </template>

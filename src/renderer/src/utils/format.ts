@@ -212,6 +212,7 @@ export function subscriptionLabel(subscription: {
 export const PAYMENT_LINK_META: Record<PaymentLinkState, { text: string; color: string }> = {
   none: { text: '未提取', color: 'default' },
   pending: { text: '待付款', color: 'orange' },
+  expired: { text: '链接失效', color: 'default' },
   paid: { text: '已开通', color: 'green' },
   other: { text: '其他档位', color: 'blue' }
 }

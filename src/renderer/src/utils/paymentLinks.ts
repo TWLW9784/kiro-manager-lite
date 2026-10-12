@@ -2,17 +2,15 @@
 //
 // 对外格式固定以「邮箱 订阅等级 支付链接」打头（订阅等级为 pro / pro+ / promax / power），
 // Excel 前三列与复制出来的每一行都是这个顺序，其余信息排在后面。
-import { isPaymentLinkStale, paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
+import { isAwaitingKiroSync, paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
 import type { Account, AccountGroup, XlsxSheet } from '@shared/types'
 import { PAYMENT_LINK_META, formatPrice, formatUsd, subscriptionLabel } from './format'
 import { exportStamp } from './transfer'
 
-/** 付款状态文案：待付款且超过 24 小时的额外标注可能过期 */
+/** 付款状态文案：Stripe 已付、Kiro 还没同步的单独标出来 */
 export function paymentStateText(account: Account, nowMs = Date.now()): string {
-  const state = paymentLinkState(account)
-  const text = PAYMENT_LINK_META[state].text
-  const link = account.paymentLink
-  return state === 'pending' && link && isPaymentLinkStale(link, nowMs) ? `${text}（可能已过期）` : text
+  if (isAwaitingKiroSync(account)) return '已付款（Kiro 待同步）'
+  return PAYMENT_LINK_META[paymentLinkState(account, nowMs)].text
 }
 
 /** 今天应付文案：查到了显示实付（USD），没查到退回标价并注明 */

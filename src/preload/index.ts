@@ -60,6 +60,8 @@ const api = {
   ) => invoke('accounts:subscription-checkout', account, subscriptionType, options),
   /** 只查可开通档位（批量提取支付链接选档位用） */
   getSubscriptionPlans: (account: unknown) => invoke('accounts:subscription-plans', account),
+  /** 查 Stripe 结算会话状态（已付款 / 未付款 / 已失效） */
+  checkCheckoutStatus: (url: string) => invoke('accounts:checkout-status', url),
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) =>
     invoke('app:open-in-app-browser', url, title),

@@ -2,22 +2,25 @@
 /**
  * 提取记录：所有带支付链接标记的账号。
  *
- * 付款状态不单独存，靠账号的最新订阅档位算出来（见 shared/paymentLink），
- * 所以「刷新订阅状态」就是对这批账号跑一遍用量刷新：用量接口会顺带返回订阅档位，
- * accessToken 过期时还会自动续一次，不必先刷密钥。
+ * 付款状态由两处信息合成（见 shared/paymentLink）：
+ * - Stripe 结算会话状态：付完立刻是 complete，过期是 expired，「检查付款状态」先问它；
+ * - Kiro 订阅档位：最终结果，Stripe 已付款的再刷一次用量同步过来。
+ * 切到本面板时会自动静默检查一次，失效的链接可以直接「重新提取」。
  *
  * 操作范围与导出弹窗同一个规则：有勾选作用于勾选项，没勾选作用于当前筛选结果。
  */
-import { computed, h, ref } from 'vue'
+import { computed, h, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   ClearOutlined,
   CopyOutlined,
   DeleteOutlined,
+  DownOutlined,
   ExportOutlined,
   FileExcelOutlined,
-  SearchOutlined,
-  SyncOutlined
+  RedoOutlined,
+  SafetyCertificateOutlined,
+  SearchOutlined
 } from '@ant-design/icons-vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
@@ -26,6 +29,7 @@ import {
   PAYMENT_LINK_META,
   formatDateTime,
   formatPrice,
+  runPool,
   subscriptionLabel,
   subscriptionMeta
 } from '@/utils/format'
@@ -39,13 +43,18 @@ import {
   paymentLinkFilename,
   paymentLinkText
 } from '@/utils/paymentLinks'
+import { extractPaymentLink, readDiscountSetting, type PlanTarget } from '@/utils/paymentLinkExtract'
 import {
-  isPaymentLinkStale,
+  isAwaitingKiroSync,
+  isPaidSubscription,
   paymentLinkState,
   paymentLinkTier,
   type PaymentLinkState
 } from '@shared/paymentLink'
-import type { Account } from '@shared/types'
+import type { Account, CheckoutSessionStatus } from '@shared/types'
+
+/** active：当前是否切到了这个面板，切过来时自动检查一次付款状态 */
+const props = defineProps<{ active?: boolean }>()
 
 const accountsStore = useAccountsStore()
 const settingsStore = useSettingsStore()
@@ -65,10 +74,10 @@ const marked = computed(() =>
 )
 
 const counts = computed(() => {
-  const result: Record<StateFilter, number> = { all: 0, pending: 0, paid: 0, other: 0 }
+  const result: Record<StateFilter, number> = { all: 0, pending: 0, expired: 0, paid: 0, other: 0 }
   for (const account of marked.value) {
     result.all++
-    const state = paymentLinkState(account)
+    const state = paymentLinkState(account, now.value)
     if (state !== 'none') result[state]++
   }
   return result
@@ -77,14 +86,15 @@ const counts = computed(() => {
 const filterOptions = computed(() => [
   { value: 'all', label: `全部 ${counts.value.all}` },
   { value: 'pending', label: `待付款 ${counts.value.pending}` },
-  { value: 'paid', label: `已开通 ${counts.value.paid}` },
+  { value: 'expired', label: `已失效 ${counts.value.expired}` },
+  { value: 'paid', label: `已付款 ${counts.value.paid}` },
   { value: 'other', label: `其他档位 ${counts.value.other}` }
 ])
 
 const visible = computed(() => {
   const kw = keyword.value.trim().toLowerCase()
   return marked.value.filter((a) => {
-    if (stateFilter.value !== 'all' && paymentLinkState(a) !== stateFilter.value) return false
+    if (stateFilter.value !== 'all' && paymentLinkState(a, now.value) !== stateFilter.value) return false
     if (kw && !`${a.email} ${a.nickname ?? ''} ${a.note ?? ''}`.toLowerCase().includes(kw)) return false
     return true
   })
@@ -106,7 +116,7 @@ const columns = [
   { title: '当前订阅', key: 'current', width: 100 },
   { title: '提取时间', key: 'createdAt', width: 150 },
   { title: '状态更新', key: 'checkedAt', width: 150 },
-  { title: '', key: 'actions', width: 92 }
+  { title: '', key: 'actions', width: 120 }
 ]
 
 const rowSelection = computed(() => ({
@@ -115,69 +125,301 @@ const rowSelection = computed(() => ({
   preserveSelectedRowKeys: true
 }))
 
-function stateMeta(account: Account): { text: string; color: string; stale: boolean } {
-  const state = paymentLinkState(account)
-  const stale = state === 'pending' && isPaymentLinkStale(account.paymentLink!, now.value)
-  return { ...PAYMENT_LINK_META[state], stale }
+function stateMeta(account: Account): { text: string; color: string; tip?: string } {
+  const state = paymentLinkState(account, now.value)
+  const link = account.paymentLink!
+  if (isAwaitingKiroSync(account)) {
+    return { text: '已付款·待同步', color: 'green', tip: 'Stripe 已显示付款完成，Kiro 的订阅档位还没更新，稍后再检查一次即可' }
+  }
+  const checked = link.stripeCheckedAt ? `Stripe 确认于 ${formatDateTime(link.stripeCheckedAt)}` : '还没向 Stripe 确认过'
+  if (state === 'expired') {
+    return { ...PAYMENT_LINK_META.expired, tip: `结算链接已失效，可点「重新提取」生成新链接（${checked}）` }
+  }
+  return { ...PAYMENT_LINK_META[state], tip: state === 'pending' ? checked : undefined }
 }
 
-/** 状态更新时间早于提取时间：付款状态还没在提取之后核对过 */
+/** 状态更新时间早于提取时间：Kiro 订阅档位还没在提取之后核对过 */
 function uncheckedSinceExtract(account: Account): boolean {
   return (account.lastCheckedAt ?? 0) < account.paymentLink!.createdAt
 }
 
-// ============ 刷新订阅状态 ============
+// ============ 检查付款状态 ============
 
-const refreshing = ref(false)
+/**
+ * 两步走，都不占全局批量任务（全局用量刷新跑着的时候也能点）：
+ * 1. 问 Stripe 结算会话状态：一个请求、不需要账号凭证，付完立刻是 complete，失效是 expired；
+ * 2. 只对 Stripe 已付款、但 Kiro 档位还是 Free 的账号刷一次用量，把订阅档位同步过来。
+ */
+const STRIPE_POOL = 8
+const KIRO_POOL = 4
+
+const checking = ref(false)
 const progress = ref('')
 const ProgressText = (): ReturnType<typeof h> => h('span', null, progress.value)
+/** 上次检查时间：切到「提取记录」时自动检查一次，2 分钟内不重复 */
+const lastCheckedAt = ref(0)
+const AUTO_CHECK_INTERVAL_MS = 2 * 60_000
 
-async function refreshStatus(): Promise<void> {
-  if (accountsStore.task.running) return void message.info('有批量刷新正在进行，请稍后再试')
-  const ids = targets.value.map((a) => a.id)
-  if (!ids.length) return void message.info('没有可刷新的账号')
+/** 需要问 Stripe 的：还没付（以 Kiro 为准）、也还没被 Stripe 判定为已付 / 已失效的 */
+function needsStripeCheck(account: Account): boolean {
+  const link = account.paymentLink
+  if (!link || isPaidSubscription(account.subscription.type)) return false
+  return link.stripeStatus !== 'complete' && link.stripeStatus !== 'expired'
+}
 
-  const key = 'payment-link-refresh'
-  refreshing.value = true
-  progress.value = `刷新订阅状态 0/${ids.length}`
-  message.open({ key, type: 'loading', content: h(ProgressText), duration: 0 })
+/** 正在跑的那次检查；复制 / 导出时撞上自动检查就等它跑完，拿到的才是最新状态 */
+let inflight: Promise<void> | null = null
+
+async function checkPayments(list: Account[], silent = false): Promise<void> {
+  if (inflight) return inflight
+  inflight = runCheck(list, silent).finally(() => {
+    inflight = null
+  })
+  return inflight
+}
+
+async function runCheck(list: Account[], silent: boolean): Promise<void> {
+  const stripeTargets = list.filter(needsStripeCheck)
+  const key = 'payment-link-check'
+  checking.value = true
   const paidBefore = counts.value.paid
+  const show = (text: string): void => {
+    progress.value = text
+    if (!silent) message.open({ key, type: 'loading', content: h(ProgressText), duration: 0 })
+  }
+  let stripeFailed = 0
+  let kiroFailed = 0
   try {
-    const res = await accountsStore.runBatch(ids, 'check', (done, total) => {
-      progress.value = `刷新订阅状态 ${done}/${total}`
+    // 第一步：Stripe
+    let done = 0
+    const updates: { id: string; url: string; status: CheckoutSessionStatus }[] = []
+    /** 会话已不能再付，但分不出是付完了还是失效了，留给第二步按 Kiro 档位定性 */
+    const inactive: { id: string; url: string }[] = []
+    show(`向 Stripe 确认付款状态 0/${stripeTargets.length}`)
+    await runPool(stripeTargets, STRIPE_POOL, async (account) => {
+      const url = account.paymentLink!.url
+      try {
+        const res = await window.api.checkCheckoutStatus(url)
+        if (!res.success || !res.data) stripeFailed++
+        else if (res.data.status === 'inactive') inactive.push({ id: account.id, url })
+        else updates.push({ id: account.id, url, status: res.data.status })
+      } catch {
+        stripeFailed++
+      } finally {
+        progress.value = `向 Stripe 确认付款状态 ${++done}/${stripeTargets.length}`
+      }
     })
-    message.destroy(key)
-    const paidDelta = counts.value.paid - paidBefore
-    const detail = `成功 ${res.success}${res.failed ? `，失败 ${res.failed}` : ''}${
-      paidDelta > 0 ? `，新增已开通 ${paidDelta}` : ''
-    }`
-    if (res.failed) {
-      message.warning(`订阅状态刷新完成：${detail}`)
-      console.warn(res.messages)
-    } else {
-      message.success(`订阅状态刷新完成：${detail}`)
+    accountsStore.setStripeStatuses(updates)
+
+    // 第二步：Stripe 已付款，或会话已不能再付的，刷一次用量拿 Kiro 最新档位
+    const inactiveIds = new Set(inactive.map((item) => item.id))
+    const syncTargets = list
+      .map((a) => accountsStore.get(a.id))
+      .filter((a): a is Account => !!a && (isAwaitingKiroSync(a) || inactiveIds.has(a.id)))
+    if (syncTargets.length) {
+      done = 0
+      show(`同步 Kiro 订阅档位 0/${syncTargets.length}`)
+      await runPool(syncTargets, KIRO_POOL, async (account) => {
+        try {
+          const res = await accountsStore.checkStatus(account.id)
+          if (!res.ok) kiroFailed++
+        } catch {
+          kiroFailed++
+        } finally {
+          progress.value = `同步 Kiro 订阅档位 ${++done}/${syncTargets.length}`
+        }
+      })
     }
+
+    // 会话不能再付、Kiro 也还是没订阅：那就是失效了，记成 expired 等着重新提取
+    accountsStore.setStripeStatuses(
+      inactive
+        .filter((item) => {
+          const account = accountsStore.get(item.id)
+          return account && !isPaidSubscription(account.subscription.type)
+        })
+        .map((item) => ({ ...item, status: 'expired' as const }))
+    )
   } finally {
     message.destroy(key)
-    refreshing.value = false
+    checking.value = false
+    lastCheckedAt.value = Date.now()
   }
+
+  if (silent) return
+  const paidDelta = counts.value.paid - paidBefore
+  const failed = stripeFailed + kiroFailed
+  const parts = [
+    `确认 ${stripeTargets.length} 条`,
+    paidDelta > 0 ? `新增已付款 ${paidDelta}` : '',
+    counts.value.expired ? `已失效 ${counts.value.expired}` : '',
+    failed ? `失败 ${failed}` : ''
+  ].filter(Boolean)
+  if (failed) message.warning(`付款状态检查完成：${parts.join('，')}`)
+  else message.success(`付款状态检查完成：${parts.join('，')}`)
+}
+
+/** 再刷一次 Kiro 档位：用于在别的地方付过款、Stripe 链接却还显示未付的情况 */
+async function syncKiro(): Promise<void> {
+  if (checking.value) return
+  const list = targets.value
+  if (!list.length) return
+  const key = 'payment-link-kiro'
+  checking.value = true
+  const paidBefore = counts.value.paid
+  let done = 0
+  let failed = 0
+  progress.value = `刷新 Kiro 订阅档位 0/${list.length}`
+  message.open({ key, type: 'loading', content: h(ProgressText), duration: 0 })
+  try {
+    await runPool(list, KIRO_POOL, async (account) => {
+      try {
+        if (!(await accountsStore.checkStatus(account.id)).ok) failed++
+      } catch {
+        failed++
+      } finally {
+        progress.value = `刷新 Kiro 订阅档位 ${++done}/${list.length}`
+      }
+    })
+  } finally {
+    message.destroy(key)
+    checking.value = false
+  }
+  const paidDelta = counts.value.paid - paidBefore
+  const text = `Kiro 订阅档位已刷新：成功 ${list.length - failed}${failed ? `，失败 ${failed}` : ''}${
+    paidDelta > 0 ? `，新增已开通 ${paidDelta}` : ''
+  }`
+  if (failed) message.warning(text)
+  else message.success(text)
+}
+
+/** 切到「提取记录」时静默检查一遍待付款的，付完回来就能看到状态变了 */
+watch(
+  () => props.active,
+  (active) => {
+    if (!active || checking.value) return
+    if (Date.now() - lastCheckedAt.value < AUTO_CHECK_INTERVAL_MS) return
+    const pending = marked.value.filter(needsStripeCheck)
+    if (pending.length) void checkPayments(pending, true)
+  },
+  { immediate: true }
+)
+
+// ============ 重新提取 ============
+
+/** 重新提取的范围：有勾选按勾选（已付款的除外），没勾选就是全部已失效的 */
+const reExtractTargets = computed(() => {
+  if (selected.value.length) {
+    return selected.value.filter((a) => {
+      const state = paymentLinkState(a, now.value)
+      return state === 'pending' || state === 'expired'
+    })
+  }
+  return marked.value.filter((a) => paymentLinkState(a, now.value) === 'expired')
+})
+
+const reExtracting = ref(false)
+
+/**
+ * 用原来的档位重新生成链接，优惠条件沿用批量提取面板上次的选择。
+ * 新链接满足条件就覆盖旧的；不满足（比如优惠已经没了）会记成「无优惠」，旧链接保持失效状态。
+ */
+async function reExtract(list: Account[]): Promise<void> {
+  if (reExtracting.value || !list.length) return
+  const setting = readDiscountSetting()
+  const key = 'payment-link-reextract'
+  reExtracting.value = true
+  let done = 0
+  const result = { ok: 0, skip: 0, fail: 0 }
+  const errors: string[] = []
+  progress.value = `重新提取 0/${list.length}`
+  message.open({ key, type: 'loading', content: h(ProgressText), duration: 0 })
+  try {
+    await runPool(
+      list,
+      KIRO_POOL,
+      async (account) => {
+        const link = account.paymentLink!
+        const target: PlanTarget = {
+          subscriptionType: link.subscriptionType,
+          title: link.planTitle,
+          amount: link.amount,
+          currency: link.currency
+        }
+        const res = await extractPaymentLink(account.id, target, setting)
+        result[res.state]++
+        if (res.state !== 'ok' && res.error) errors.push(`${account.email}：${res.error}`)
+        progress.value = `重新提取 ${++done}/${list.length}`
+      },
+      { staggerMs: 600 }
+    )
+  } finally {
+    message.destroy(key)
+    reExtracting.value = false
+  }
+  const text = `重新提取完成：成功 ${result.ok}${result.skip ? `，跳过 ${result.skip}` : ''}${
+    result.fail ? `，失败 ${result.fail}` : ''
+  }`
+  if (errors.length) console.warn('[PaymentLink] 重新提取未成功：', errors)
+  if (result.fail || result.skip) message.warning(`${text}（原因见系统日志）`)
+  else message.success(text)
+}
+
+function reExtractOne(account: Account): void {
+  void reExtract([account])
 }
 
 // ============ 复制 / 导出 / 清除 ============
 
-function copyLinks(format: 'full' | 'url'): void {
-  const list = targets.value
-  if (!list.length) return
-  copyText(paymentLinkText(list, format), `已复制 ${list.length} 条支付链接`)
+/**
+ * 复制 / 导出给别人付款的链接：先向 Stripe 确认一遍，只交出还能付的（待付款）。
+ * 勾选了的按勾选原样输出，用户明确点名的不替他筛。
+ */
+async function payableTargets(): Promise<{ list: Account[]; dropped: number }> {
+  if (selected.value.length) return { list: selected.value, dropped: 0 }
+  const unchecked = targets.value.filter(needsStripeCheck)
+  if (unchecked.length) await checkPayments(unchecked, true)
+  const ids = new Set(targets.value.map((a) => a.id))
+  const fresh = marked.value.filter((a) => ids.has(a.id))
+  const list = fresh.filter((a) => paymentLinkState(a, Date.now()) === 'pending')
+  return { list, dropped: fresh.length - list.length }
+}
+
+const preparing = ref(false)
+
+async function copyLinks(format: 'full' | 'url'): Promise<void> {
+  if (preparing.value) return
+  preparing.value = true
+  try {
+    const { list, dropped } = await payableTargets()
+    if (!list.length) return void message.info('没有还能付款的链接，可以先「重新提取」失效的')
+    const skipped = dropped ? `，已跳过失效 / 已付款的 ${dropped} 条` : ''
+    copyText(paymentLinkText(list, format), `已复制 ${list.length} 条支付链接${skipped}`)
+  } finally {
+    preparing.value = false
+  }
 }
 
 const exporting = ref(false)
 
-async function exportXlsx(): Promise<void> {
-  const list = targets.value
-  if (!list.length || exporting.value) return
+/**
+ * payable：只导出还能付款的（发给别人付款用）；否则导出全部记录，导出前同样先确认一遍状态，
+ * 表里「付款状态」那一列才是最新的。
+ */
+async function exportXlsx(payable: boolean): Promise<void> {
+  if (!targets.value.length || exporting.value) return
   exporting.value = true
   try {
+    let list: Account[]
+    if (payable) {
+      list = (await payableTargets()).list
+      if (!list.length) return void message.info('没有还能付款的链接，可以先「重新提取」失效的')
+    } else {
+      const unchecked = targets.value.filter(needsStripeCheck)
+      if (unchecked.length) await checkPayments(unchecked, true)
+      const ids = new Set(targets.value.map((a) => a.id))
+      list = marked.value.filter((a) => ids.has(a.id))
+    }
     const sheet = buildPaymentLinkSheet(list, accountsStore.groups)
     const res = await window.api.exportToXlsx(toPlain(sheet), paymentLinkFilename())
     if (!res.success) return void message.error(res.error || '导出失败')
@@ -211,10 +453,10 @@ function clearTargets(): void {
   clearMarks(targets.value, `清除 ${targets.value.length} 个账号的支付链接标记`)
 }
 
-/** 已开通的标记留着也没用了，一键清掉，免得记录越堆越多 */
+/** 已付款的标记留着也没用了，一键清掉，免得记录越堆越多 */
 function clearPaid(): void {
-  const list = marked.value.filter((a) => paymentLinkState(a) === 'paid')
-  clearMarks(list, `清除 ${list.length} 个已开通账号的标记`)
+  const list = marked.value.filter((a) => paymentLinkState(a, now.value) === 'paid')
+  clearMarks(list, `清除 ${list.length} 个已付款账号的标记`)
 }
 
 function copyOne(account: Account): void {
@@ -242,6 +484,8 @@ function clearOne(account: Account): void {
         </a-radio-button>
       </a-radio-group>
       <span class="spacer" />
+      <span v-if="checking" class="muted small">正在确认付款状态…</span>
+      <span v-else-if="lastCheckedAt" class="muted small">付款状态确认于 {{ formatDateTime(lastCheckedAt) }}</span>
       <a-input
         v-model:value="keyword"
         allow-clear
@@ -280,12 +524,8 @@ function clearOne(account: Account): void {
           </div>
         </template>
         <template v-else-if="column.key === 'state'">
-          <a-tooltip
-            :title="stateMeta(record).stale ? '提取已超过 24 小时，结算链接可能已失效，可重新提取' : undefined"
-          >
-            <a-tag :color="stateMeta(record).stale ? 'default' : stateMeta(record).color" :bordered="false">
-              {{ stateMeta(record).text }}{{ stateMeta(record).stale ? '·可能过期' : '' }}
-            </a-tag>
+          <a-tooltip :title="stateMeta(record).tip">
+            <a-tag :color="stateMeta(record).color" :bordered="false">{{ stateMeta(record).text }}</a-tag>
           </a-tooltip>
         </template>
         <template v-else-if="column.key === 'current'">
@@ -305,7 +545,12 @@ function clearOne(account: Account): void {
         </template>
         <template v-else-if="column.key === 'actions'">
           <a-space :size="0">
-            <a-tooltip title="复制支付链接">
+            <a-tooltip v-if="['pending', 'expired'].includes(paymentLinkState(record, now))" title="重新提取：生成一条新链接">
+              <a-button type="text" size="small" :disabled="reExtracting" @click="reExtractOne(record)">
+                <template #icon><RedoOutlined /></template>
+              </a-button>
+            </a-tooltip>
+            <a-tooltip title="复制：邮箱 订阅等级 支付链接">
               <a-button type="text" size="small" @click="copyOne(record)">
                 <template #icon><CopyOutlined /></template>
               </a-button>
@@ -326,20 +571,41 @@ function clearOne(account: Account): void {
     </a-table>
 
     <div class="footer">
-      <a-button
+      <!-- 主按钮先问 Stripe 再同步 Kiro；下拉里的「刷新 Kiro 订阅档位」用于在别处付过款的情况 -->
+      <a-dropdown-button
         type="primary"
-        :loading="refreshing"
-        :disabled="!targets.length || (accountsStore.task.running && !refreshing)"
-        @click="refreshStatus"
+        :loading="checking"
+        :disabled="!targets.length || reExtracting"
+        @click="checkPayments(targets)"
       >
-        <template #icon><SyncOutlined /></template>
-        刷新订阅状态{{ scopeSuffix }}
-      </a-button>
-      <a-dropdown :disabled="!targets.length">
-        <a-button :disabled="!targets.length">
-          <template #icon><CopyOutlined /></template>
-          复制链接{{ scopeSuffix }}
+        <SafetyCertificateOutlined />
+        检查付款状态{{ scopeSuffix }}
+        <template #icon><DownOutlined /></template>
+        <template #overlay>
+          <a-menu>
+            <a-menu-item key="kiro" :disabled="checking" @click="syncKiro">
+              刷新 Kiro 订阅档位{{ scopeSuffix }}
+            </a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown-button>
+      <a-tooltip title="用原来的档位重新生成结算链接；有勾选按勾选，没勾选就是全部已失效的">
+        <a-button
+          :loading="reExtracting"
+          :disabled="!reExtractTargets.length || checking"
+          @click="reExtract(reExtractTargets)"
+        >
+          <template #icon><RedoOutlined /></template>
+          重新提取（{{ reExtractTargets.length }}）
         </a-button>
+      </a-tooltip>
+      <a-dropdown :disabled="!targets.length || preparing">
+        <a-tooltip title="复制前会先向 Stripe 确认，只复制还能付款的；勾选了的按勾选原样复制">
+          <a-button :disabled="!targets.length" :loading="preparing">
+            <template #icon><CopyOutlined /></template>
+            复制可付款链接
+          </a-button>
+        </a-tooltip>
         <template #overlay>
           <a-menu>
             <a-menu-item key="full" @click="copyLinks('full')">邮箱 订阅等级 支付链接</a-menu-item>
@@ -347,10 +613,18 @@ function clearOne(account: Account): void {
           </a-menu>
         </template>
       </a-dropdown>
-      <a-button :disabled="!targets.length" :loading="exporting" @click="exportXlsx">
-        <template #icon><FileExcelOutlined /></template>
-        导出 Excel{{ scopeSuffix }}
-      </a-button>
+      <a-dropdown :disabled="!targets.length || exporting">
+        <a-button :disabled="!targets.length" :loading="exporting">
+          <template #icon><FileExcelOutlined /></template>
+          导出 Excel
+        </a-button>
+        <template #overlay>
+          <a-menu>
+            <a-menu-item key="payable" @click="exportXlsx(true)">只导出可付款的</a-menu-item>
+            <a-menu-item key="all" @click="exportXlsx(false)">导出全部记录{{ scopeSuffix }}</a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
       <span class="spacer" />
       <a-dropdown :disabled="!marked.length">
         <a-button danger :disabled="!marked.length">
@@ -360,7 +634,7 @@ function clearOne(account: Account): void {
         <template #overlay>
           <a-menu>
             <a-menu-item key="paid" :disabled="!counts.paid" @click="clearPaid">
-              清除已开通（{{ counts.paid }}）
+              清除已付款（{{ counts.paid }}）
             </a-menu-item>
             <a-menu-item key="targets" :disabled="!targets.length" @click="clearTargets">
               清除{{ selected.length ? '已选' : '当前列表' }}（{{ targets.length }}）

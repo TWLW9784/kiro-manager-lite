@@ -57,6 +57,7 @@ import type {
   LogQuery,
   LogQueryResult,
   ProactiveRenewalPayload,
+  CheckoutProbeStatus,
   SubscriptionCheckout,
   SubscriptionEntry,
   SubscriptionPlanList,
@@ -168,6 +169,8 @@ export interface Api {
   ) => Promise<IpcResult<SubscriptionCheckout>>
   /** 只查可开通档位（批量提取支付链接选档位用） */
   getSubscriptionPlans: (account: Account) => Promise<IpcResult<SubscriptionPlanList>>
+  /** 查 Stripe 结算会话状态（已付款 / 未付款 / 已失效） */
+  checkCheckoutStatus: (url: string) => Promise<IpcResult<{ status: CheckoutProbeStatus }>>
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) => Promise<IpcResult<{ url: string }>>
 

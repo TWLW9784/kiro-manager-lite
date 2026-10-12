@@ -18,6 +18,7 @@ import {
   getSubscriptionEntry,
   getSubscriptionPlans
 } from './kiroSubscription'
+import { checkCheckoutStatus } from './stripeCheckout'
 import { clearKiroSsoCache, readKiroAuthToken, readLocalKiroCredentials, ssoCacheFile } from './kiroAuth'
 import { restartKiroIde } from './kiroProcess'
 import { chatTraceOf, listKiroModels, streamApiKeyChat, streamKiroChat } from './kiroChat'
@@ -296,6 +297,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   handle('accounts:subscription-plans', async (_e, account: Account) =>
     ok(await getSubscriptionPlans(account))
+  )
+
+  /** 只查 Stripe 结算会话状态：已付款 / 未付款 / 已失效，不需要账号凭证 */
+  handle('accounts:checkout-status', async (_e, url: string) =>
+    ok({ status: await checkCheckoutStatus(url) })
   )
 
   /** 用内置浏览器打开链接（Stripe 账单 / 结算页） */

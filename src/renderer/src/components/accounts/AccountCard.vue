@@ -34,7 +34,7 @@ import {
 import { displayEmail, displayName, displayNote } from '@/utils/display'
 import { now } from '@/utils/now'
 import { copyText } from '@/utils/ui'
-import { isPaymentLinkStale, paymentLinkState } from '@shared/paymentLink'
+import { isAwaitingKiroSync, paymentLinkState } from '@shared/paymentLink'
 import type { Account, AccountDisplayMode } from '@shared/types'
 
 const props = withDefaults(
@@ -130,18 +130,19 @@ const daysRemaining = computed(() => props.account.subscription.daysRemaining)
 const payment = computed(() => {
   const link = props.account.paymentLink
   if (!link) return null
-  const state = paymentLinkState(props.account)
+  const state = paymentLinkState(props.account, now.value)
+  const syncing = isAwaitingKiroSync(props.account)
   const meta = PAYMENT_LINK_META[state]
-  const stale = state === 'pending' && isPaymentLinkStale(link, now.value)
   const lines = [
     `目标档位：${link.planTitle}（${formatPrice(link.amount, link.currency)}）`,
     `提取于 ${formatDateTime(link.createdAt)}`,
-    stale ? '已超过 24 小时，链接可能已失效，建议重新提取' : '',
+    syncing ? 'Stripe 已显示付款完成，Kiro 订阅档位待同步' : '',
+    state === 'expired' ? '链接已失效，可在「新订阅管理 → 提取记录」重新提取' : '',
     '点击复制支付链接'
   ]
   return {
-    text: stale ? `${meta.text}·可能过期` : meta.text,
-    color: stale ? 'default' : meta.color,
+    text: syncing ? '已付款·待同步' : meta.text,
+    color: meta.color,
     tips: lines.filter(Boolean)
   }
 })

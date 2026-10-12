@@ -10,7 +10,7 @@
 // 只读不写：init 不会扣款，也不会改 Session 状态。
 import { httpRequest } from './net'
 import { inAppChromeUserAgent } from './kiroPortal'
-import type { CheckoutPrice } from '../shared/types'
+import type { CheckoutPrice, CheckoutProbeStatus } from '../shared/types'
 
 const STRIPE_API = 'https://api.stripe.com/v1'
 
@@ -110,8 +110,52 @@ export function extractCheckoutPrice(data: Json): CheckoutPrice {
   }
 }
 
+/** init 失败时带上 HTTP 状态与 Stripe 的错误文案，便于判断是不是会话失效 */
+class StripeInitError extends Error {
+  constructor(
+    message: string,
+    readonly status: number
+  ) {
+    super(message)
+  }
+}
+
 /** 查结算链接的实付金额 */
 export async function probeCheckoutPrice(url: string): Promise<CheckoutPrice> {
+  return extractCheckoutPrice(await initCheckout(url))
+}
+
+/**
+ * 查结算会话现在的状态（只读，不扣款）。
+ *
+ * 实测（2026-10）：
+ * - 未付款、仍可付：200，status=open / payment_status=unpaid；
+ * - 不能再付：400「This Checkout Session is no longer active.」——付完和失效是同一句话，
+ *   归成 inactive，由调用方再查 Kiro 档位定性；同一账号生成新链接后旧会话也会这样，
+ *   所以提取后不到 1 小时就失效并不少见；
+ * - 会话 id 不存在：404，按查询失败抛出。
+ */
+export async function checkCheckoutStatus(url: string): Promise<CheckoutProbeStatus> {
+  let data: Json
+  try {
+    data = await initCheckout(url)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    if (error instanceof StripeInitError && error.status === 400) {
+      if (/expired/i.test(message)) return 'expired'
+      if (/no longer active|not active|inactive/i.test(message)) return 'inactive'
+    }
+    throw error
+  }
+  const status = String(data.status ?? '').toLowerCase()
+  const paid = String(data.payment_status ?? '').toLowerCase()
+  if (status === 'complete' || paid === 'paid' || paid === 'no_payment_required') return 'complete'
+  if (status === 'expired') return 'expired'
+  return 'open'
+}
+
+/** 结算页的初始化数据：浏览器打开结算页时第一个请求拿到的就是它 */
+async function initCheckout(url: string): Promise<Json> {
   const { sessionId, publishableKey } = parseCheckoutUrl(url)
   const body = new URLSearchParams({
     key: publishableKey,
@@ -142,7 +186,7 @@ export async function probeCheckoutPrice(url: string): Promise<CheckoutPrice> {
   }
   if (!res.ok) {
     const message = obj(data.error)?.message
-    throw new Error(`Stripe HTTP ${res.status}${message ? `: ${String(message)}` : ''}`)
+    throw new StripeInitError(`Stripe HTTP ${res.status}${message ? `: ${String(message)}` : ''}`, res.status)
   }
-  return extractCheckoutPrice(data)
+  return data
 }

@@ -26,9 +26,10 @@ import {
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
-import { formatPrice, formatUsd as usd, runPool, subscriptionLabel } from '@/utils/format'
+import { formatPrice, runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
 import { toPlain } from '@/utils/ipc'
+import { now } from '@/utils/now'
 import { confirmDanger, copyText } from '@/utils/ui'
 import {
   buildPaymentLinkSheet,
@@ -36,10 +37,18 @@ import {
   paymentLinkFilename,
   paymentLinkText
 } from '@/utils/paymentLinks'
+import {
+  discountRuleText,
+  extractPaymentLink,
+  readDiscountSetting,
+  writeDiscountSetting,
+  type DiscountRule,
+  type DiscountSetting
+} from '@/utils/paymentLinkExtract'
 import { errorMessage } from '@shared/errors'
-import { paymentLinkTier } from '@shared/paymentLink'
+import { paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
 import { shouldSkipAccountUsageRefresh } from '@shared/refreshPolicy'
-import type { Account, CheckoutPrice, SubscriptionPlan } from '@shared/types'
+import type { Account, SubscriptionPlan } from '@shared/types'
 
 const emit = defineEmits<{ running: [boolean]; 'show-records': [] }>()
 
@@ -52,7 +61,6 @@ const privacy = computed(() => settingsStore.settings.privacyMode)
 
 /** 上次的选择记在本地，下次打开默认还是它 */
 const PLAN_STORAGE_KEY = 'kal.paymentLink.plan'
-const RULE_STORAGE_KEY = 'kal.paymentLink.rule'
 
 /**
  * 档位列表与账号无关，在会话内缓存 10 分钟：
@@ -145,44 +153,14 @@ onMounted(() => void loadPlans())
 
 // ============ 优惠条件 ============
 
-/**
- * any：结算页有余额抵扣就算新用户（新号自带 $20 Stripe 余额）；
- * max：在有抵扣的基础上，今天应付还要不超过给定金额。
- *
- * 不能拿「实付 < 标价」判断：首期按到重置日的剩余天数折算，没有优惠的老号实付也会低于标价。
- */
-type DiscountRule = 'any' | 'max' | 'off'
-const savedRule = (() => {
-  try {
-    return JSON.parse(readStorage(RULE_STORAGE_KEY) || '{}') as { rule?: DiscountRule; max?: number }
-  } catch {
-    return {}
-  }
-})()
-const discountRule = ref<DiscountRule>(savedRule.rule ?? 'any')
-const maxAmount = ref<number | null>(savedRule.max ?? 5)
+const savedSetting = readDiscountSetting()
+const discountRule = ref<DiscountRule>(savedSetting.rule)
+const maxAmount = ref<number | null>(savedSetting.max)
+const setting = computed<DiscountSetting>(() => ({ rule: discountRule.value, max: maxAmount.value }))
 
-watch([discountRule, maxAmount], () =>
-  writeStorage(RULE_STORAGE_KEY, JSON.stringify({ rule: discountRule.value, max: maxAmount.value }))
-)
+watch(setting, (value) => writeDiscountSetting(value))
 
-const ruleText = computed(() => {
-  if (discountRule.value === 'off') return '不校验金额，全部保留'
-  if (discountRule.value === 'max') return `只保留有新用户抵扣、且今天应付 ≤ $${maxAmount.value ?? 0} 的`
-  return '只保留有新用户余额抵扣的'
-})
-
-/** 按规则判断这条链接要不要；返回 null 表示满足 */
-function rejectReason(price: CheckoutPrice | undefined): string | null {
-  if (discountRule.value === 'off') return null
-  if (!price) return '没读到实付金额'
-  if (price.credit <= 0) return `无新用户抵扣（今付 ${usd(price.amountDue)}）`
-  if (discountRule.value === 'max') {
-    const limit = maxAmount.value ?? 0
-    if (price.amountDue > limit + 1e-6) return `今付 ${usd(price.amountDue)}，高于 $${limit}`
-  }
-  return null
-}
+const ruleText = computed(() => discountRuleText(setting.value))
 
 // ============ 范围与数量 ============
 
@@ -191,11 +169,20 @@ const groupIds = ref<string[]>([])
 /** 导入时间顺序：新号一般最后导入，默认从新到旧 */
 const order = ref<'newest' | 'oldest'>('newest')
 const skipExtracted = ref(true)
+/** 跳过已提取时，链接已失效的照样重新提取：失效链接留着没用，不算「已提取」 */
+const reExtractExpired = ref(true)
 const skipNoDiscount = ref(true)
 const skipAbnormal = ref(true)
 /** 提取数量；null 表示「全部候选」 */
 const quantity = ref<number | null>(null)
-const concurrency = ref(2)
+
+/** 并发上限 20：每条要过 Kiro 门户 + CBOR + Stripe 三个请求，再高容易被限流 */
+const MAX_CONCURRENCY = 20
+const CONCURRENCY_STORAGE_KEY = 'kal.paymentLink.concurrency'
+const concurrency = ref(
+  Math.min(MAX_CONCURRENCY, Math.max(1, Number(readStorage(CONCURRENCY_STORAGE_KEY)) || 3))
+)
+watch(concurrency, (value) => value && writeStorage(CONCURRENCY_STORAGE_KEY, String(value)))
 
 const groupOptions = computed(() => [
   { value: UNGROUPED, label: '未分组' },
@@ -218,22 +205,27 @@ const scopeAccounts = computed(() => {
 /** 范围内各类账号的数量，同时给出跳过之后的候选列表 */
 const breakdown = computed(() => {
   let extracted = 0
+  let expired = 0
   let noDiscount = 0
   let abnormal = 0
+  const nowMs = now.value
   const candidates: Account[] = []
   for (const account of scopeAccounts.value) {
-    const isExtracted = !!account.paymentLink
+    const state = paymentLinkState(account, nowMs)
+    const isExtracted = state !== 'none'
+    const isExpired = state === 'expired'
     const isNoDiscount = !!account.discountCheck
     const isAbnormal = shouldSkipAccountUsageRefresh(account)
     if (isExtracted) extracted++
+    if (isExpired) expired++
     if (isNoDiscount) noDiscount++
     if (isAbnormal) abnormal++
-    if (skipExtracted.value && isExtracted) continue
+    if (skipExtracted.value && isExtracted && !(reExtractExpired.value && isExpired)) continue
     if (skipNoDiscount.value && isNoDiscount) continue
     if (skipAbnormal.value && isAbnormal) continue
     candidates.push(account)
   }
-  return { extracted, noDiscount, abnormal, candidates }
+  return { extracted, expired, noDiscount, abnormal, candidates }
 })
 
 const takeCount = computed(() => {
@@ -307,71 +299,24 @@ function revealRow(index: number): void {
   target?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 }
 
-function priceLabel(price: CheckoutPrice): string {
-  const credit = price.credit > 0 ? ` − 抵扣 ${usd(price.credit)}` : ''
-  return `今付 ${usd(price.amountDue)}（首期 ${usd(price.subtotal)}${credit}）`
-}
-
-async function extractOne(row: Row, target: SubscriptionPlan, index: number): Promise<void> {
+async function extractOne(row: Row, target: SubscriptionPlan, rule: DiscountSetting, index: number): Promise<void> {
   row.state = 'running'
   row.error = undefined
   row.priceText = undefined
   await nextTick()
   revealRow(index)
-  try {
-    const account = await accountsStore.freshAccount(row.id)
-    const res = await window.api.createSubscriptionCheckout(toPlain(account), target.subscriptionType, {
-      probePrice: discountRule.value !== 'off'
-    })
-    if (!res.success || !res.data) throw new Error(res.error || '生成支付链接失败')
-    const { url, kind, price, priceError } = res.data
-    if (kind === 'manage') {
-      // 档位数据滞后时会遇到：账号其实已订阅，接口只给账单管理链接，不记标记
-      row.state = 'skip'
-      row.error = `已有订阅（${subscriptionLabel(account.subscription)}），接口只返回账单管理链接`
-      return
-    }
-    if (price) row.priceText = priceLabel(price)
-
-    const reason = rejectReason(price)
-    if (reason) {
-      row.state = price ? 'skip' : 'fail'
-      row.error = price ? reason : `${reason}：${priceError || '未知原因'}`
-      // 读到了金额却不满足条件才记「无优惠」；没读到属于临时故障，留着下次重试
-      if (price) {
-        accountsStore.setDiscountCheck(row.id, {
-          subscriptionType: target.subscriptionType,
-          planTitle: target.title,
-          amountDue: price.amountDue,
-          credit: price.credit,
-          checkedAt: Date.now()
-        })
-      }
-      return
-    }
-
-    accountsStore.setPaymentLink(row.id, {
-      url,
-      subscriptionType: target.subscriptionType,
-      planTitle: target.title,
-      amount: target.amount,
-      currency: target.currency,
-      amountDue: price?.amountDue,
-      credit: price?.credit,
-      subtotal: price?.subtotal,
-      createdAt: Date.now()
-    })
-    row.state = 'ok'
-    row.url = url
-  } catch (e) {
-    row.state = 'fail'
-    row.error = errorMessage(e)
-  }
+  const result = await extractPaymentLink(row.id, target, rule)
+  row.state = result.state
+  row.url = result.url
+  row.priceText = result.priceText
+  row.error = result.error
 }
 
 async function run(list: Row[]): Promise<void> {
   const target = runPlan.value
   if (!target || !list.length) return
+  // 本轮的优惠条件同样在开跑时定下，中途改选择不影响已在跑的这一批
+  const rule = { ...setting.value }
   running.value = true
   aborted.value = false
   const before = { ...stat.value }
@@ -382,7 +327,7 @@ async function run(list: Row[]): Promise<void> {
       async (row) => {
         // 中止后排队中的行保持「等待」，可以点「继续提取」接着跑
         if (aborted.value) return
-        await extractOne(row, target, rows.value.indexOf(row))
+        await extractOne(row, target, rule, rows.value.indexOf(row))
       },
       { staggerMs: 600 }
     )
@@ -580,6 +525,11 @@ function tierOf(row: Row): string {
           <a-checkbox v-model:checked="skipExtracted">
             跳过已提取过的<span class="muted">（{{ breakdown.extracted }}）</span>
           </a-checkbox>
+          <a-tooltip title="Stripe 结算链接一般 24 小时失效。已失效、又没付款的账号不算「已提取」，照样重新生成一条新链接">
+            <a-checkbox v-model:checked="reExtractExpired" :disabled="!skipExtracted">
+              但重新提取链接已失效的<span class="muted">（{{ breakdown.expired }}）</span>
+            </a-checkbox>
+          </a-tooltip>
           <a-checkbox v-model:checked="skipNoDiscount">
             跳过已确认无优惠的<span class="muted">（{{ breakdown.noDiscount }}）</span>
           </a-checkbox>
@@ -612,14 +562,22 @@ function tierOf(row: Row): string {
           </span>
           <span class="spacer" />
           <span>并发</span>
-          <a-input-number v-model:value="concurrency" :min="1" :max="5" :precision="0" style="width: 72px" />
+          <a-tooltip title="同时提取的账号数，最多 20。每个账号要过 Kiro 门户与 Stripe 三个请求，太高容易被限流">
+            <a-input-number
+              v-model:value="concurrency"
+              :min="1"
+              :max="MAX_CONCURRENCY"
+              :precision="0"
+              style="width: 72px"
+            />
+          </a-tooltip>
         </div>
       </div>
 
       <a-alert
         type="info"
         show-icon
-        message="逐个生成 Stripe 结算链接并读取结算页金额（统一换算成美元）。新号的优惠是 Stripe 余额里的 $20，从首期扣；首期按到重置日的剩余天数折算，例如 Pro+ 剩 20 天时首期 $24.93，扣完今天付 $4.93，之后每月 $40。满足条件的才保存并标记为「待付款」，不满足的记为「无优惠」，下次默认跳过。Stripe 结算链接通常 24 小时内有效。"
+        message="逐个生成 Stripe 结算链接并读取结算页金额（统一换算成美元）。新号的优惠是 Stripe 余额里的 $20，从首期扣；首期按到重置日的剩余天数折算，例如 Pro+ 剩 20 天时首期 $24.93，扣完今天付 $4.93，之后每月 $40。满足条件的才保存并标记为「待付款」，不满足的记为「无优惠」，下次默认跳过。结算链接会失效（最长 24 小时，同一账号重新生成后旧链接立即失效），失效的可以再次提取。"
       />
 
       <div class="footer">

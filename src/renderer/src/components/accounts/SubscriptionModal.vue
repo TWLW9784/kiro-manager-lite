@@ -120,11 +120,29 @@ async function checkoutUrl(plan: SubscriptionPlan, action: string): Promise<stri
   try {
     const res = await window.api.createSubscriptionCheckout(
       toPlain(await freshAccount()),
-      plan.subscriptionType
+      plan.subscriptionType,
+      { probePrice: true }
     )
     if (!res.success || !res.data?.url) {
       message.error(res.error || '生成支付链接失败')
       return ''
+    }
+    // 结算链接同样记成支付链接标记：付没付、失没失效都能在「新订阅管理」里跟进
+    if (res.data.kind === 'checkout') {
+      const { price } = res.data
+      accountsStore.setPaymentLink(props.account.id, {
+        url: res.data.url,
+        subscriptionType: plan.subscriptionType,
+        planTitle: plan.title,
+        amount: plan.amount,
+        currency: plan.currency,
+        amountDue: price?.amountDue,
+        credit: price?.credit,
+        subtotal: price?.subtotal,
+        stripeStatus: 'open',
+        stripeCheckedAt: Date.now(),
+        createdAt: Date.now()
+      })
     }
     return res.data.url
   } catch (e) {

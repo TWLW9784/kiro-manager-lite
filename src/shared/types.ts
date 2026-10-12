@@ -159,6 +159,20 @@ export interface SubscriptionCheckout {
 }
 
 /**
+ * Stripe 结算会话状态：open 还能付，complete 已付款，expired 已失效（默认 24 小时）。
+ * 付款后 Stripe 立刻是 complete，Kiro 那边的订阅档位要等它处理完回调才变，
+ * 所以「已付款」以 Stripe 为准能早一步看到，不用干等 Kiro 同步。
+ */
+export type CheckoutSessionStatus = 'open' | 'complete' | 'expired'
+
+/**
+ * checkCheckoutStatus 的结果比会话状态多一种：inactive。
+ * 实测会话一旦不能再付，init 一律回 400「This Checkout Session is no longer active.」，
+ * 付完和失效是同一句话，分不出来；调用方要再查一次 Kiro 档位才能定性。
+ */
+export type CheckoutProbeStatus = CheckoutSessionStatus | 'inactive'
+
+/**
  * Stripe Checkout Session 上的金额，统一换算成美元（元，不是美分）。
  *
  * 实测（2026-10，新 Builder ID 账号，Pro+ 标价 $40）：
@@ -217,6 +231,10 @@ export interface AccountPaymentLink {
   credit?: number
   /** 首期金额（USD，按剩余天数折算、抵扣前） */
   subtotal?: number
+  /** 最近一次向 Stripe 查到的结算会话状态；没查过为空 */
+  stripeStatus?: CheckoutSessionStatus
+  /** stripeStatus 的查询时间戳（ms） */
+  stripeCheckedAt?: number
   /** 提取时间戳（ms） */
   createdAt: number
 }
