@@ -22,6 +22,7 @@ import {
   exportFilename,
   type ExportFormat
 } from '@/utils/transfer'
+import { auditExport } from '@/utils/audit'
 import { toPlain } from '@/utils/ipc'
 import { copyText } from '@/utils/ui'
 import type { ExportBundle } from '@shared/types'
@@ -138,9 +139,20 @@ function close(): void {
   emit('update:open', false)
 }
 
+/** 日志里的导出方式：格式名 + 是否带凭证，回查时一眼看出导出去的是不是能直接用的号 */
+function exportLabel(how: string): string {
+  const name = formats.value.find((item) => item.value === format.value)?.label ?? format.value
+  return `${how}（${name}，${effectiveCredentials.value ? '含凭证' : '不含凭证'}）`
+}
+
+function logExport(how: string, path?: string): void {
+  auditExport(`${exportLabel(how)}${path ? ` → ${path}` : ''}`, targets.value.map((a) => a.email))
+}
+
 function copy(): void {
   if (targets.value.length === 0) return void message.warning('没有可导出的账号')
   copyText(content(), `已复制 ${targets.value.length} 个账号到剪贴板`)
+  logExport('复制到剪贴板')
   close()
 }
 
@@ -150,6 +162,7 @@ async function saveFile(): Promise<void> {
   const res = await window.api.exportToFile(content(), filename)
   if (!res.success) return void message.error(res.error || '导出失败')
   if (!res.data?.saved) return
+  logExport('导出文件', res.data.path)
   message.success(`已导出 ${targets.value.length} 个账号`)
   close()
 }
@@ -160,7 +173,7 @@ async function saveZip(): Promise<void> {
   const bundle: ExportBundle = {
     files: [{ name: exportFilename(format.value, targets.value), content: content() }]
   }
-  await sendZip(bundle, `已打包导出 ${targets.value.length} 个账号`)
+  await sendZip(bundle, `已打包导出 ${targets.value.length} 个账号`, '导出压缩包')
 }
 
 /** 逐个分割：每账号一个 JSON，再加 all.json / all.txt / all.xlsx，一起压成 zip */
@@ -171,16 +184,17 @@ async function saveSplitZip(): Promise<void> {
     appVersion: settingsStore.appInfo?.version ?? '1.0.0',
     groups: accountsStore.groups
   })
-  await sendZip(bundle, `已分割导出 ${targets.value.length} 个账号`)
+  await sendZip(bundle, `已分割导出 ${targets.value.length} 个账号`, '逐个分割导出')
 }
 
-async function sendZip(bundle: ExportBundle, successText: string): Promise<void> {
+async function sendZip(bundle: ExportBundle, successText: string, how: string): Promise<void> {
   zipping.value = true
   try {
     // 响应式代理无法结构化克隆，过 IPC 前先剥成普通对象
     const res = await window.api.exportToZip(toPlain(bundle), bundleFilename(targets.value))
     if (!res.success) return void message.error(res.error || '导出失败')
     if (!res.data?.saved) return
+    logExport(how, res.data.path)
     message.success(`${successText}（共 ${res.data.count ?? 0} 个文件）`)
     close()
   } finally {

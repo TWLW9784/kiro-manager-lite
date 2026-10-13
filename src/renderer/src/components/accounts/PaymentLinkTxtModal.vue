@@ -6,6 +6,7 @@
 import { computed, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { CopyOutlined, DownloadOutlined, FileTextOutlined } from '@ant-design/icons-vue'
+import { auditExport } from '@/utils/audit'
 import { copyText } from '@/utils/ui'
 import {
   buildPaymentLinkTxt,
@@ -58,6 +59,7 @@ async function save(): Promise<void> {
     if (!res.success) return void message.error(res.error || '导出失败')
     if (!res.data?.saved) return
     remember()
+    auditExport(`导出代付 TXT → ${res.data.path ?? filename}`, props.accounts.map((a) => a.email))
     message.success(`已导出 ${props.accounts.length} 条代付链接`)
     emit('close')
   } finally {
@@ -69,6 +71,7 @@ function copy(): void {
   if (!props.accounts.length) return
   remember()
   copyText(content.value, `已复制 ${props.accounts.length} 条代付链接`)
+  auditExport('复制代付 TXT 到剪贴板', props.accounts.map((a) => a.email))
   emit('close')
 }
 </script>

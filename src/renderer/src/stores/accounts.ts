@@ -27,6 +27,7 @@ import { paymentLinkState, type PaymentLinkState } from '@shared/paymentLink'
 import { DEFAULT_REGION } from '@shared/regions'
 import { runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
+import { auditEmails } from '@/utils/audit'
 import { toPlain } from '@/utils/ipc'
 import { isSocialIdp, normalizeIdp } from '@/utils/transfer'
 import { useSettingsStore } from './settings'
@@ -659,8 +660,26 @@ export const useAccountsStore = defineStore('accounts', () => {
     activeAccountId.value = res.data.accounts.activeAccountId ?? null
     const removedSet = new Set(uniqueIds)
     selectedIds.value = selectedIds.value.filter((id) => !removedSet.has(id))
-    if (res.data.removed) console.warn(`[Account] 已删除 ${res.data.removed} 个账号`)
+    // 删除日志由主进程写（带邮箱清单），这里不重复记
     return { removed: res.data.removed }
+  }
+
+  /**
+   * 从回收站恢复。以主进程返回的最新快照为准，同删除一样先取消待发的旧快照保存，
+   * 免得旧快照回写把刚恢复的账号又盖掉。
+   */
+  async function restoreAccounts(
+    ids: string[]
+  ): Promise<{ restored: number; duplicated: number; error?: string }> {
+    if (!ids.length) return { restored: 0, duplicated: 0 }
+    if (saveTimer) {
+      clearTimeout(saveTimer)
+      saveTimer = null
+    }
+    const res = await window.api.restoreAccounts(ids)
+    if (!res.success || !res.data) return { restored: 0, duplicated: 0, error: res.error || '恢复失败' }
+    accounts.value = res.data.accounts.accounts ?? []
+    return { restored: res.data.restored.length, duplicated: res.data.duplicated.length }
   }
 
   // ============ 批量导入 ============
@@ -773,21 +792,14 @@ export const useAccountsStore = defineStore('accounts', () => {
    * 成功的只记邮箱清单（分批，单条日志有长度上限），失败与跳过的原因逐条记。
    */
   function logImport(result: BatchResult, created: Account[], label = '批量导入'): void {
-    const write = (level: 'info' | 'warn', text: string): void => {
-      void window.api.writeLog(level, `[Import] ${text}`)
-    }
-    write(
+    auditEmails(
       result.failed ? 'warn' : 'info',
-      `${label}结束：成功 ${result.success}，跳过 ${result.skipped}，失败 ${result.failed}`
+      'Import',
+      `${label}结束：成功 ${result.success}，跳过 ${result.skipped}，失败 ${result.failed}；新增账号如下`,
+      created.map((a) => a.email)
     )
-    // 一条日志放 20 个邮箱，几百条导入也不会被截断
-    for (let i = 0; i < created.length; i += 20) {
-      const part = created.slice(i, i + 20)
-      write('info', `新增 ${i + 1}-${i + part.length}：${part.map((a) => a.email).join('、')}`)
-    }
     for (const line of result.messages) {
-      if (/校验失败|异常/.test(line)) write('warn', line)
-      else write('info', line)
+      void window.api.writeLog(/校验失败|异常/.test(line) ? 'warn' : 'info', `[Import] ${line}`)
     }
   }
 
@@ -1437,6 +1449,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     removeAccounts,
     importItems,
     importFullData,
+    restoreAccounts,
     // 刷新 / 切号
     refreshToken,
     checkStatus,

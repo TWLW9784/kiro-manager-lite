@@ -59,6 +59,7 @@ import type {
   LogQueryResult,
   ProactiveRenewalPayload,
   CheckoutPrice,
+  DeletedAccount,
   CheckoutProbeStatus,
   SubscriptionCheckout,
   SubscriptionEntry,
@@ -89,7 +90,18 @@ export interface Api {
   deleteAccounts: (ids: string[]) => Promise<IpcResult<{
     accounts: AccountStoreData
     removed: number
+    removedEmails: string[]
   }>>
+  /** 回收站：删除的账号保留 30 天，最近删的在前 */
+  getRecycleBin: () => Promise<IpcResult<DeletedAccount[]>>
+  /** 从回收站恢复；已在列表里的同一个号只从回收站移除 */
+  restoreAccounts: (ids: string[]) => Promise<IpcResult<{
+    accounts: AccountStoreData
+    restored: string[]
+    duplicated: string[]
+  }>>
+  /** 从回收站彻底删除；不传 ids 表示清空 */
+  purgeAccounts: (ids?: string[]) => Promise<IpcResult<{ purged: number }>>
 
   loadKeys: () => Promise<IpcResult<KeyGatewayData>>
   addKey: (key: string, note?: string, region?: string) => Promise<IpcResult<KeyGatewayData>>

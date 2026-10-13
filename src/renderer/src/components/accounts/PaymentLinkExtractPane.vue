@@ -30,6 +30,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
 import { formatLocal, formatPrice, formatUsd, runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
+import { auditExport } from '@/utils/audit'
 import { toPlain } from '@/utils/ipc'
 import { now } from '@/utils/now'
 import { confirmDanger, copyText } from '@/utils/ui'
@@ -495,7 +496,10 @@ async function exportXlsx(): Promise<void> {
     const sheet = buildPaymentLinkSheet(list, accountsStore.groups)
     const res = await window.api.exportToXlsx(toPlain(sheet), paymentLinkFilename())
     if (!res.success) return void message.error(res.error || '导出失败')
-    if (res.data?.saved) message.success(`已导出 ${sheet.rows.length} 条支付链接`)
+    if (res.data?.saved) {
+      auditExport(`导出支付链接 Excel → ${res.data.path ?? ""}`, list.map((a) => a.email))
+      message.success(`已导出 ${sheet.rows.length} 条支付链接`)
+    }
   } finally {
     exporting.value = false
   }

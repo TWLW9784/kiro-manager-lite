@@ -7,8 +7,10 @@ import {
   DEFAULT_KEY_GATEWAY_DATA,
   DEFAULT_PRIMARY_COLOR,
   DEFAULT_SETTINGS,
+  type Account,
   type AccountStoreData,
   type AppSettings,
+  type DeletedAccount,
   DEFAULT_PROXY_CONFIG,
   type KeyGatewayData,
   type MachineIdBackup,
@@ -96,6 +98,8 @@ interface Schema {
   proxyRequireKeyDefault: boolean
   /** 写入 Kiro CLI 环境变量的记录，见 kiroCliEnv */
   kiroCliEnvBackup: KiroCliEnvBackup | null
+  /** 回收站：删除的账号先放这里，可恢复；超过保留期或条数上限的自动清掉 */
+  deletedAccounts: DeletedAccount[]
 }
 
 const EMPTY_DATA: AccountStoreData = { version: 1, accounts: [], activeAccountId: null }
@@ -117,7 +121,8 @@ const store = new Store<Schema>({
     proxyApiKeys: [],
     proxyPayloadDefault153600: false,
     proxyRequireKeyDefault: false,
-    kiroCliEnvBackup: null
+    kiroCliEnvBackup: null,
+    deletedAccounts: []
   }
 })
 
@@ -433,14 +438,14 @@ export async function setAccountData(data: AccountStoreData): Promise<void> {
 /** 从主进程最新快照删除账号，避免渲染进程用旧整表覆盖主动续期刚写入的新凭证 */
 export async function deleteAccountData(
   ids: string[]
-): Promise<{ accounts: AccountStoreData; removed: number }> {
+): Promise<{ accounts: AccountStoreData; removed: number; removedEmails: string[] }> {
   const remove = new Set(ids.filter(Boolean))
   const current = getAccountData()
-  if (!remove.size) return { accounts: current, removed: 0 }
+  if (!remove.size) return { accounts: current, removed: 0, removedEmails: [] }
 
+  const removedList = current.accounts.filter((account) => remove.has(account.id))
   const remaining = current.accounts.filter((account) => !remove.has(account.id))
-  const removed = current.accounts.length - remaining.length
-  if (!removed) return { accounts: current, removed: 0 }
+  if (!removedList.length) return { accounts: current, removed: 0, removedEmails: [] }
 
   const accounts: AccountStoreData = {
     ...current,
@@ -450,8 +455,77 @@ export async function deleteAccountData(
         ? null
         : current.activeAccountId
   }
+  // 先进回收站再删：顺序反过来的话，写回收站失败就真丢了
+  moveToRecycleBin(removedList)
   await setAccountData(accounts)
-  return { accounts, removed }
+  return { accounts, removed: removedList.length, removedEmails: removedList.map((a) => a.email) }
+}
+
+// ============ 回收站 ============
+
+/** 回收站保留 30 天、最多 5000 条；超出的从最早删的开始清 */
+const RECYCLE_KEEP_MS = 30 * 24 * 60 * 60 * 1000
+const RECYCLE_MAX = 5000
+
+function readRecycleBin(): DeletedAccount[] {
+  const list = (read('deletedAccounts') as DeletedAccount[] | undefined) ?? []
+  const cutoff = Date.now() - RECYCLE_KEEP_MS
+  return list.filter((item) => item?.account && item.deletedAt > cutoff)
+}
+
+function moveToRecycleBin(list: Account[]): void {
+  const deletedAt = Date.now()
+  // 同一账号被删过又导入、再删一次：回收站里只留最新那份
+  const ids = new Set(list.map((a) => a.id))
+  const kept = readRecycleBin().filter((item) => !ids.has(item.account.id))
+  const next = [...list.map((account) => ({ account, deletedAt })), ...kept].slice(0, RECYCLE_MAX)
+  write('deletedAccounts', next)
+}
+
+/** 回收站列表，最近删的在前 */
+export function getRecycleBin(): DeletedAccount[] {
+  return readRecycleBin().sort((a, b) => b.deletedAt - a.deletedAt)
+}
+
+/**
+ * 从回收站恢复。
+ * 已经在账号列表里的（删后又重新导入了同一个号：同 id，或同邮箱同登录方式）不再恢复，只从回收站移除，
+ * 免得出现两条同样的账号。
+ */
+export async function restoreFromRecycleBin(
+  ids: string[]
+): Promise<{ accounts: AccountStoreData; restored: string[]; duplicated: string[] }> {
+  const want = new Set(ids)
+  const bin = readRecycleBin()
+  const current = getAccountData()
+  const existingIds = new Set(current.accounts.map((a) => a.id))
+  const existingKeys = new Set(current.accounts.map((a) => `${a.email.toLowerCase()}|${a.idp}`))
+  const restored: Account[] = []
+  const duplicated: string[] = []
+  for (const item of bin) {
+    if (!want.has(item.account.id)) continue
+    const key = `${item.account.email.toLowerCase()}|${item.account.idp}`
+    if (existingIds.has(item.account.id) || existingKeys.has(key)) {
+      duplicated.push(item.account.email)
+      continue
+    }
+    // 恢复回来的不可能还是 IDE 当前账号
+    restored.push({ ...item.account, isActive: false })
+    existingKeys.add(key)
+  }
+  write('deletedAccounts', bin.filter((item) => !want.has(item.account.id)))
+  const accounts = restored.length ? { ...current, accounts: [...current.accounts, ...restored] } : current
+  if (restored.length) await setAccountData(accounts)
+  return { accounts, restored: restored.map((a) => a.email), duplicated }
+}
+
+/** 从回收站彻底删除；ids 为空表示清空回收站 */
+export function purgeRecycleBin(ids?: string[]): string[] {
+  const bin = readRecycleBin()
+  const target = ids ? new Set(ids) : null
+  const purged = bin.filter((item) => !target || target.has(item.account.id))
+  write('deletedAccounts', target ? bin.filter((item) => !target.has(item.account.id)) : [])
+  return purged.map((item) => item.account.email)
 }
 
 export function getSettings(): AppSettings {

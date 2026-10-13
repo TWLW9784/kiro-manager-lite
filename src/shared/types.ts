@@ -284,6 +284,12 @@ export interface AccountGroup {
   order: number
 }
 
+/** 回收站里的一条：删除时的完整账号快照 + 删除时间 */
+export interface DeletedAccount {
+  account: Account
+  deletedAt: number
+}
+
 /** 持久化载荷 */
 export interface AccountStoreData {
   version: number

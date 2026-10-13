@@ -37,6 +37,10 @@ const api = {
   loadAccounts: () => invoke('accounts:load'),
   saveAccounts: (data: unknown) => invoke('accounts:save', data),
   deleteAccounts: (ids: string[]) => invoke('accounts:delete', ids),
+  /** 回收站：删除的账号保留 30 天 */
+  getRecycleBin: () => invoke('accounts:recycle-bin'),
+  restoreAccounts: (ids: string[]) => invoke('accounts:restore', ids),
+  purgeAccounts: (ids?: string[]) => invoke('accounts:purge', ids),
 
   /** 用账号凭证向 Kiro 控制面申请一个新的 API Key */
   createAccountApiKey: (account: unknown, label: string) =>

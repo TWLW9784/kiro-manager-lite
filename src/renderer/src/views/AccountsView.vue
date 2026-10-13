@@ -14,6 +14,7 @@ import {
   InboxOutlined,
   KeyOutlined,
   PlusOutlined,
+  RestOutlined,
   SearchOutlined,
   SyncOutlined,
   UploadOutlined
@@ -25,6 +26,7 @@ import AddAccountModal from '@/components/accounts/AddAccountModal.vue'
 import ImportAccountsFileModal from '@/components/accounts/ImportAccountsFileModal.vue'
 import ImportAccountsTextModal from '@/components/accounts/ImportAccountsTextModal.vue'
 import ExportAccountsModal from '@/components/accounts/ExportAccountsModal.vue'
+import RecycleBinModal from '@/components/accounts/RecycleBinModal.vue'
 import EditAccountModal from '@/components/accounts/EditAccountModal.vue'
 import BatchNoteModal from '@/components/common/BatchNoteModal.vue'
 import GroupPickerModal from '@/components/common/GroupPickerModal.vue'
@@ -47,6 +49,7 @@ import { displayEmail as maskedEmail } from '@/utils/display'
 import { accountGroupApi } from '@/utils/groupApi'
 import { toPlain } from '@/utils/ipc'
 import { buildExportContent } from '@/utils/transfer'
+import { auditExport } from '@/utils/audit'
 import {
   bodyPopupContainer,
   confirmDanger,
@@ -77,6 +80,7 @@ function openImport(kind: 'file' | 'text'): void {
   else importTextOpen.value = true
 }
 const exportOpen = ref(false)
+const recycleOpen = ref(false)
 const batchNoteOpen = ref(false)
 const batchGroupOpen = ref(false)
 const batchApiKeyOpen = ref(false)
@@ -399,6 +403,7 @@ function copyToken(account: Account): void {
     groups: accountsStore.groups
   })
   copyText(content, '凭证 JSON 已复制到剪贴板')
+  auditExport('复制凭证 JSON（卡片）', [account.email])
 }
 
 const switchResult = ref<SwitchAccountResult | null>(null)
@@ -442,7 +447,7 @@ function removeOne(account: Account): void {
   if (!settingsStore.settings.confirmBeforeDelete) return void doRemove()
   confirmDelete({
     title: '删除账号',
-    content: h('span', {}, [`确认删除 ${displayEmail(account.email)}？该操作不可撤销。`]),
+    content: h('span', {}, [`确认删除 ${displayEmail(account.email)}？删除后可在「回收站」里恢复（保留 30 天）。`]),
     onOk: doRemove
   })
 }
@@ -452,7 +457,7 @@ function removeSelected(): void {
   if (ids.length === 0) return void message.info('请先选择账号')
   confirmDelete({
     title: `删除 ${ids.length} 个账号`,
-    content: '删除后无法恢复，建议先导出备份。',
+    content: '删除后移入回收站，30 天内可以在「回收站」里恢复。',
     onOk: async () => {
       const result = await accountsStore.removeAccounts(ids)
       if (result.error) return void message.error(result.error)
@@ -576,6 +581,12 @@ function logoutIde(account: Account): void {
           <template #icon><DownloadOutlined /></template>
           导出
         </a-button>
+        <a-tooltip title="删除的账号保留 30 天，可恢复">
+          <a-button @click="recycleOpen = true">
+            <template #icon><RestOutlined /></template>
+            回收站
+          </a-button>
+        </a-tooltip>
       </div>
 
       <!-- 第二行：统计 + 筛选 / 排序 / 批量 / 选择 -->
@@ -813,6 +824,7 @@ function logoutIde(account: Account): void {
       v-model:open="exportOpen"
       :selected-ids="accountsStore.selectedIds"
     />
+    <RecycleBinModal v-if="recycleOpen" @close="recycleOpen = false" />
     <EditAccountModal v-if="editTarget" :account="editTarget" @close="editTarget = null" />
     <BatchNoteModal
       v-if="batchNoteOpen"

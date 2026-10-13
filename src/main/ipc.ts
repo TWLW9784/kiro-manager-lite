@@ -142,6 +142,9 @@ import {
 import { errorMessage } from '../shared/errors'
 import {
   deleteAccountData,
+  getRecycleBin,
+  purgeRecycleBin,
+  restoreFromRecycleBin,
   viewAccountData,
   getBackupDir,
   ensureBackupDir,
@@ -226,6 +229,23 @@ export function applyRuntimeSettings(settings: AppSettings): void {
   )
 }
 
+/** 积分日志要保留的账号：现有账号 + 回收站里的（恢复后「是否订阅过」等判断还要用历史） */
+function keepHistoryIds(accountIds: string[]): string[] {
+  return [...accountIds, ...getRecycleBin().map((item) => item.account.id)]
+}
+
+/**
+ * 写一条带邮箱清单的操作日志：先一条总览，再每 20 个邮箱一条。
+ * 导入 / 导出 / 删除 / 恢复这类事后要回查「动了哪些号」的操作都走这里，搜邮箱就能找到。
+ */
+export function auditEmails(level: LogLevel, category: string, summary: string, emails: string[]): void {
+  log(level, `[${category}] ${summary}`)
+  for (let i = 0; i < emails.length; i += 20) {
+    const part = emails.slice(i, i + 20)
+    log(level, `[${category}] ${i + 1}-${i + part.length}：${part.join('、')}`)
+  }
+}
+
 export function registerIpc(getWindow: () => BrowserWindow | null): void {
   // ============ 数据持久化 ============
   // 返回值经 IPC 序列化后渲染进程拿到的就是副本，这里不必再深拷贝一次
@@ -233,20 +253,42 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   handle('accounts:save', async (_e, data: AccountStoreData) => {
     await setAccountData(data)
-    // 账号被删掉后它的积分日志就没人看了，顺手清掉
-    pruneUsageHistory((data.accounts ?? []).map((a) => a.id))
+    // 账号被删掉后它的积分日志就没人看了，顺手清掉（回收站里的留着，恢复后还要用）
+    pruneUsageHistory(keepHistoryIds((data.accounts ?? []).map((a) => a.id)))
     return ok()
   })
 
   handle('accounts:delete', async (_e, ids: string[]) => {
     const result = await deleteAccountData(Array.isArray(ids) ? ids : [])
     if (result.removed) {
-      pruneUsageHistory(result.accounts.accounts.map((account) => account.id))
+      pruneUsageHistory(keepHistoryIds(result.accounts.accounts.map((account) => account.id)))
       forgetSwitchedAccounts(ids)
       // 删除的若是 IDE 激活账号，立即清掉旧续期 timer；否则按剩余激活账号重新对齐。
       scheduleForActiveAccount()
+      auditEmails('warn', 'Account', `删除 ${result.removed} 个账号（已移入回收站，30 天内可恢复）`, result.removedEmails)
     }
     return ok(result)
+  })
+
+  // ============ 回收站 ============
+  handle('accounts:recycle-bin', () => ok(getRecycleBin()))
+
+  handle('accounts:restore', async (_e, ids: string[]) => {
+    const result = await restoreFromRecycleBin(Array.isArray(ids) ? ids : [])
+    if (result.restored.length) {
+      auditEmails('info', 'Account', `从回收站恢复 ${result.restored.length} 个账号`, result.restored)
+    }
+    if (result.duplicated.length) {
+      auditEmails('info', 'Account', `${result.duplicated.length} 个账号已在列表中，只从回收站移除`, result.duplicated)
+    }
+    return ok(result)
+  })
+
+  handle('accounts:purge', (_e, ids?: string[]) => {
+    const purged = purgeRecycleBin(Array.isArray(ids) ? ids : undefined)
+    pruneUsageHistory(keepHistoryIds(viewAccountData().accounts.map((account) => account.id)))
+    if (purged.length) auditEmails('warn', 'Account', `从回收站彻底删除 ${purged.length} 个账号`, purged)
+    return ok({ purged: purged.length })
   })
 
   // ============ 积分变化日志 ============
