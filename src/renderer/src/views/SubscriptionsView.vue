@@ -5,7 +5,15 @@
  * 两个面板都常驻（v-show 而不是 v-if）：提取跑到一半切去看记录，回来时进度还在。
  */
 import { computed, ref } from 'vue'
-import { CreditCardOutlined, UnorderedListOutlined } from '@ant-design/icons-vue'
+import {
+  CloudSyncOutlined,
+  CreditCardOutlined,
+  SyncOutlined,
+  UnorderedListOutlined
+} from '@ant-design/icons-vue'
+import PaylinksSyncModal from '@/components/accounts/PaylinksSyncModal.vue'
+import { formatDateTime } from '@/utils/format'
+import { paylinksSyncState } from '@/utils/paylinksSync'
 import PaymentLinkExtractPane from '@/components/accounts/PaymentLinkExtractPane.vue'
 import PaymentLinkRecordsPane from '@/components/accounts/PaymentLinkRecordsPane.vue'
 import { useAccountsStore } from '@/stores/accounts'
@@ -19,6 +27,15 @@ const tab = ref<'extract' | 'records'>('extract')
 const extracting = ref(false)
 
 const freeCount = computed(() => accountsStore.stats.bySubscription.Free)
+
+const syncOpen = ref(false)
+const syncState = computed(() => paylinksSyncState.value)
+const syncTip = computed(() => {
+  if (!settingsStore.settings.paylinksSyncEnabled) return '代付链接网站同步：未开启'
+  const s = syncState.value
+  if (!s.lastAt) return '代付链接网站同步：已开启，等待第一次同步'
+  return `上次同步 ${formatDateTime(s.lastAt)}：${s.lastError ? `失败（${s.lastError}）` : s.lastSummary}`
+})
 const pendingCount = computed(() => accountsStore.stats.byPaymentState.pending)
 const paidCount = computed(() => accountsStore.stats.byPaymentState.paid)
 const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
@@ -39,6 +56,19 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
         </a-radio-button>
       </a-radio-group>
       <span class="spacer" />
+      <a-tooltip :title="syncTip">
+        <a-button :size="settingsStore.toolbarSize" @click="syncOpen = true">
+          <template #icon>
+            <SyncOutlined v-if="syncState.running" spin />
+            <CloudSyncOutlined v-else />
+          </template>
+          网站同步
+          <a-badge
+            :status="!settingsStore.settings.paylinksSyncEnabled ? 'default' : syncState.lastError ? 'error' : 'success'"
+            style="margin-left: 6px"
+          />
+        </a-button>
+      </a-tooltip>
       <a-tag :bordered="false">Free {{ freeCount }}</a-tag>
       <a-tag color="orange" :bordered="false">待付款 {{ pendingCount }}</a-tag>
       <a-tag v-if="expiredCount" :bordered="false">已失效 {{ expiredCount }}</a-tag>
@@ -55,6 +85,7 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
       />
       <PaymentLinkRecordsPane v-show="tab === 'records'" :active="tab === 'records'" />
     </div>
+    <PaylinksSyncModal v-if="syncOpen" @close="syncOpen = false" />
   </div>
 </template>
 

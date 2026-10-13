@@ -10,6 +10,7 @@ import UpdateAvailableModal from '@/components/common/UpdateAvailableModal.vue'
 import CloseConfirmModal from '@/components/common/CloseConfirmModal.vue'
 import { useSettingsStore } from '@/stores/settings'
 import { useAccountsStore } from '@/stores/accounts'
+import { startPaylinksSync } from '@/utils/paylinksSync'
 import { useKeysStore } from '@/stores/keys'
 import { useUpdateStore } from '@/stores/update'
 import { useTrayBridge } from '@/utils/tray'
@@ -76,6 +77,8 @@ onMounted(async () => {
   await Promise.all([accountsStore.load(), keysStore.load()])
   accountsStore.startAutoRefresh()
   keysStore.startAutoRefresh()
+  // 代付链接网站同步：开着就在后台每分钟跑，不依赖停在新订阅管理页
+  startPaylinksSync()
 })
 
 // 开关或间隔改动后重新对齐自动刷新；startAutoRefresh 是幂等的，
@@ -96,6 +99,15 @@ watch(
     settingsStore.settings.apiKeyUsageRefreshInterval
   ],
   () => keysStore.startAutoRefresh()
+)
+
+watch(
+  () => [
+    settingsStore.settings.paylinksSyncEnabled,
+    settingsStore.settings.paylinksServerUrl,
+    settingsStore.settings.paylinksSyncToken
+  ],
+  () => startPaylinksSync()
 )
 
 // 原生窗口标题：带上当前版本号

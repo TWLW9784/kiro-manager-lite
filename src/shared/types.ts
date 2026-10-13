@@ -238,6 +238,12 @@ export interface AccountPaymentLink {
   localCurrency?: string
   /** 提取时的汇率：1 USD = localRate 展示币种 */
   localRate?: number
+  /** 网站上的状态（available 可领 / claimed 已领 / checking 确认中 / paid / refresh 待换新）；没同步过为空 */
+  serverStatus?: string
+  /** 网站上领取时间（字符串，北京时间） */
+  serverClaimedAt?: string
+  /** 最近一次推到网站上的链接哈希；换新链接后据此通知网站下架旧的 */
+  syncedHash?: string
   /** 最近一次向 Stripe 查到的结算会话状态；没查过为空 */
   stripeStatus?: CheckoutSessionStatus
   /** stripeStatus 的查询时间戳（ms） */
@@ -282,6 +288,47 @@ export interface AccountGroup {
   name: string
   /** 展示顺序，越小越靠前 */
   order: number
+}
+
+// ============ 代付链接网站同步 ============
+
+/** 推到网站的一条链接；网站不收邮箱，账号只给哈希 */
+export interface PaylinksUpsert {
+  url: string
+  account_ref: string
+  tier: string
+  amount_due?: number
+  amount_cny?: number
+  list_price?: number
+  extracted_at: number
+}
+
+export interface PaylinksSyncBody {
+  upsert?: PaylinksUpsert[]
+  /** 已被新链接替换的旧链接哈希，网站下架它们 */
+  supersede?: string[]
+  /** 用 Kiro 档位确认过的「不能再付」链接：paid 付了，expired 失效 */
+  resolve?: { url_hash: string; result: 'paid' | 'expired' }[]
+}
+
+/** 网站返回的一条链接状态 */
+export interface PaylinksServerLink {
+  url_hash: string
+  account_ref: string
+  tier: string
+  amount_due: string | null
+  status: 'available' | 'claimed' | 'checking' | 'paid' | 'refresh'
+  refresh_reason: string | null
+  claimed_at: string | null
+  paid_at: string | null
+  stripe_status: string | null
+}
+
+export interface PaylinksSyncResult {
+  ok: boolean
+  now: string
+  stats: { inserted: number; superseded: number; resolved: number }
+  links: PaylinksServerLink[]
 }
 
 /** 回收站里的一条：删除时的完整账号快照 + 删除时间 */
@@ -1448,6 +1495,20 @@ export interface AppSettings {
    * 后者影响页面里 navigator.language 读到的值——门户按前端语言判断时只有它管用。
    */
   portalLocale: PortalLocale
+  /**
+   * 代付链接网站同步：开启后定时把「待付款」链接推到网站，网站上客户领取、Stripe 付款状态同步回来；
+   * 网站标记要换新的（领走超时、放回、失效、价格已不是最优）由这里重新提取。
+   */
+  paylinksSyncEnabled: boolean
+  /** 网站地址，如 https://paylinks.example.com */
+  paylinksServerUrl: string
+  /** 网站 config.php 里的 sync_token */
+  paylinksSyncToken: string
+  /**
+   * 只推这个时间之后提取的链接（ms）。开启同步时记下：之前提取的可能已经用 TXT 发给别人了，
+   * 再挂到网站上会被第二个人领到。0 表示连已有的待付款也一起推（设置里明确勾选才会这样）。
+   */
+  paylinksSyncSince: number
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -1493,7 +1554,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   // 固定间隔重试，10 次也只多花 1 秒左右，对话不会有明显卡顿
   gatewayRetryMaxAttempts: 10,
   gatewayRetryDelayMs: 100,
-  portalLocale: DEFAULT_PORTAL_LOCALE
+  portalLocale: DEFAULT_PORTAL_LOCALE,
+  paylinksSyncEnabled: false,
+  paylinksServerUrl: '',
+  paylinksSyncToken: '',
+  paylinksSyncSince: 0
 }
 
 // ============================================

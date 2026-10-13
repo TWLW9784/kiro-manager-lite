@@ -59,6 +59,8 @@ import type {
   LogQueryResult,
   ProactiveRenewalPayload,
   CheckoutPrice,
+  PaylinksSyncBody,
+  PaylinksSyncResult,
   DeletedAccount,
   CheckoutProbeStatus,
   SubscriptionCheckout,
@@ -187,6 +189,17 @@ export interface Api {
   checkCheckoutStatus: (
     url: string
   ) => Promise<IpcResult<{ status: CheckoutProbeStatus; price?: CheckoutPrice }>>
+  /** 代付链接网站：账号 id / 链接 → 网站上用的哈希 */
+  paylinksHashes: (input: {
+    accountIds?: string[]
+    urls?: string[]
+  }) => Promise<IpcResult<{ accountRefs: Record<string, string>; urlHashes: Record<string, string> }>>
+  /** 代付链接网站：推送 / 下架 / 回报，返回网站上的最新状态 */
+  paylinksSync: (
+    serverUrl: string,
+    token: string,
+    body: PaylinksSyncBody
+  ) => Promise<IpcResult<PaylinksSyncResult>>
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) => Promise<IpcResult<{ url: string }>>
 

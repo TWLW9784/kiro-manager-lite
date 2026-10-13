@@ -66,6 +66,10 @@ const api = {
   getSubscriptionPlans: (account: unknown) => invoke('accounts:subscription-plans', account),
   /** 查 Stripe 结算会话状态（已付款 / 未付款 / 已失效） */
   checkCheckoutStatus: (url: string) => invoke('accounts:checkout-status', url),
+  /** 代付链接网站：哈希计算与同步 */
+  paylinksHashes: (input: unknown) => invoke('paylinks:hashes', input),
+  paylinksSync: (serverUrl: string, token: string, body: unknown) =>
+    invoke('paylinks:sync', serverUrl, token, body),
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) =>
     invoke('app:open-in-app-browser', url, title),

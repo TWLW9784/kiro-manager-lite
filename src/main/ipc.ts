@@ -19,6 +19,7 @@ import {
   getSubscriptionPlans
 } from './kiroSubscription'
 import { checkCheckoutStatus } from './stripeCheckout'
+import { accountRef, paylinksSync, urlHash } from './paylinksSync'
 import { startClipboardWatch, stopClipboardWatch } from './clipboardWatch'
 import { clearKiroSsoCache, readKiroAuthToken, readLocalKiroCredentials, ssoCacheFile } from './kiroAuth'
 import { restartKiroIde } from './kiroProcess'
@@ -344,6 +345,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   handle('accounts:subscription-plans', async (_e, account: Account) =>
     ok(await getSubscriptionPlans(account))
+  )
+
+  // ============ 代付链接网站 ============
+  /** 账号 id / 链接 → 网站上用的哈希；网站不存邮箱，只认哈希 */
+  handle('paylinks:hashes', (_e, input: { accountIds?: string[]; urls?: string[] }) =>
+    ok({
+      accountRefs: Object.fromEntries((input.accountIds ?? []).map((id) => [id, accountRef(id)])),
+      urlHashes: Object.fromEntries((input.urls ?? []).map((url) => [url, urlHash(url)]))
+    })
+  )
+
+  handle('paylinks:sync', async (_e, serverUrl: string, token: string, body: unknown) =>
+    ok(await paylinksSync(serverUrl, token, body))
   )
 
   /** 只查 Stripe 结算会话状态：已付款 / 未付款 / 已失效，不需要账号凭证 */

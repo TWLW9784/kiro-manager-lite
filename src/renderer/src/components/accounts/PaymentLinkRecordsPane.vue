@@ -50,6 +50,7 @@ import {
 } from '@/utils/paymentLinks'
 import {
   extractPaymentLink,
+  optimizableSaving,
   priceFields,
   readDiscountSetting,
   type PlanTarget
@@ -341,15 +342,36 @@ watch(
 // ============ 重新提取 ============
 
 /** 重新提取的范围：有勾选按勾选（已付款的除外），没勾选就是全部已失效的 */
+/** 链接已在网站上被客户领走：链接在工作人员手里，本地不能再动它 */
+function claimedOnSite(account: Account): boolean {
+  const s = account.paymentLink?.serverStatus
+  return s === 'claimed' || s === 'checking'
+}
+
+/** 现在重新生成能便宜多少（0 表示不值得换）；见 optimizableSaving */
+function savingOf(account: Account): number {
+  if (!account.paymentLink || claimedOnSite(account)) return 0
+  if (paymentLinkState(account, now.value) !== 'pending') return 0
+  return optimizableSaving(account.paymentLink, account.subscription.expiresAt, now.value)
+}
+
+/**
+ * 重新提取的范围：有勾选按勾选（已付款、网站上已被领走的除外）；
+ * 没勾选就是全部已失效的，加上放久了重新生成会更便宜的。
+ */
 const reExtractTargets = computed(() => {
   if (selected.value.length) {
     return selected.value.filter((a) => {
       const state = paymentLinkState(a, now.value)
-      return state === 'pending' || state === 'expired'
+      return (state === 'pending' || state === 'expired') && !claimedOnSite(a)
     })
   }
-  return marked.value.filter((a) => paymentLinkState(a, now.value) === 'expired')
+  return marked.value.filter(
+    (a) => !claimedOnSite(a) && (paymentLinkState(a, now.value) === 'expired' || savingOf(a) > 0)
+  )
 })
+
+const optimizableCount = computed(() => marked.value.filter((a) => savingOf(a) > 0).length)
 
 const reExtracting = ref(false)
 
@@ -577,6 +599,12 @@ function clearOne(account: Account): void {
           <div v-if="localDueText(record.paymentLink)" class="small local-due">
             ≈ {{ localDueText(record.paymentLink) }}
           </div>
+          <a-tooltip v-if="savingOf(record) > 0" title="首期按到重置日的剩余天数折算，这条放久了，重新提取能更便宜">
+            <a-tag color="cyan" :bordered="false" class="saving-tag">可省 ${{ savingOf(record).toFixed(2) }}</a-tag>
+          </a-tooltip>
+          <a-tag v-if="record.paymentLink.serverStatus === 'claimed'" color="orange" :bordered="false" class="saving-tag">
+            网站已领取
+          </a-tag>
         </template>
         <template v-else-if="column.key === 'state'">
           <a-tooltip :title="rowMeta.get(record.id)?.tip">
@@ -645,7 +673,7 @@ function clearOne(account: Account): void {
           </a-menu>
         </template>
       </a-dropdown-button>
-      <a-tooltip title="用原来的档位重新生成结算链接；有勾选按勾选，没勾选就是全部已失效的">
+      <a-tooltip :title="`用原来的档位重新生成结算链接；有勾选按勾选，没勾选就是全部已失效的${optimizableCount ? `，加上 ${optimizableCount} 条放久了重新生成更便宜的` : ''}。网站上已被领走的不会动`">
         <a-button
           :loading="reExtracting"
           :disabled="!reExtractTargets.length || checking"
@@ -723,4 +751,5 @@ function clearOne(account: Account): void {
 .email-cell > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .url-cell { font-size: 11px; }
 .local-due { color: #fa8c16; }
+.saving-tag { margin: 2px 0 0; font-size: 11px; line-height: 18px; padding: 0 6px; }
 </style>

@@ -121,6 +121,31 @@ export function estimateFirstPayment(
   return { subtotal, due: Math.max(0, Math.round((subtotal - NEW_USER_CREDIT) * 100) / 100) }
 }
 
+/** 价格优化门槛：链接放了这么久、且现在重新生成能便宜这么多，才算值得换 */
+export const OPTIMIZE_MIN_AGE_MS = 30 * 60_000
+export const OPTIMIZE_MIN_SAVING_USD = 0.3
+
+/**
+ * 现在重新生成这条链接能便宜多少（USD）；不值得换时返回 0。
+ *
+ * 链接的金额在生成那一刻就定了（首期 = 月费 × 到重置日的剩余天数比例 − $20），
+ * 之后剩余天数一天天变少，同一个号重新生成会越来越便宜。放了一段时间的待付款链接，
+ * 用最新的剩余天数估一下，便宜够多就值得换新。
+ */
+export function optimizableSaving(
+  link: Pick<AccountPaymentLink, 'amount' | 'amountDue' | 'createdAt'>,
+  resetAt: number | undefined,
+  nowMs = Date.now(),
+  currentDue?: number
+): number {
+  const due = currentDue ?? link.amountDue
+  if (due === undefined || nowMs - link.createdAt < OPTIMIZE_MIN_AGE_MS) return 0
+  const estimate = estimateFirstPayment(link.amount, resetAt, nowMs)
+  if (!estimate) return 0
+  const saving = Math.round((due - estimate.due) * 100) / 100
+  return saving >= OPTIMIZE_MIN_SAVING_USD ? saving : 0
+}
+
 // ============ 汇率 ============
 
 /**

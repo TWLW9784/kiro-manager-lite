@@ -585,6 +585,26 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
+  /**
+   * 批量改支付链接上的字段（网站同步回写状态用），一次换引用 + 一次写盘。
+   * 同样只改 url 对得上的那条，期间被换成新链接的不受旧状态影响。
+   */
+  function patchPaymentLinks(updates: { id: string; url: string; patch: Partial<AccountPaymentLink> }[]): void {
+    if (!updates.length) return
+    const byId = new Map(updates.map((u) => [u.id, u]))
+    let changed = false
+    const next = accounts.value.map((account) => {
+      const update = byId.get(account.id)
+      if (!update || account.paymentLink?.url !== update.url) return account
+      changed = true
+      return { ...account, paymentLink: { ...account.paymentLink, ...update.patch } }
+    })
+    if (changed) {
+      accounts.value = next
+      persist()
+    }
+  }
+
   /** 记下「查过实付金额、没有优惠」，下次批量提取默认跳过 */
   function setDiscountCheck(id: string, check: AccountDiscountCheck): void {
     updateAccount(id, { discountCheck: check })
@@ -1433,6 +1453,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     // 支付链接
     setPaymentLink,
     setStripeStatuses,
+    patchPaymentLinks,
     setDiscountCheck,
     clearDiscountChecks,
     clearPaymentLinks,
