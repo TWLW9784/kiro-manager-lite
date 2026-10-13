@@ -11,7 +11,17 @@ export function urlHash(url: string): string {
   return createHash('sha256').update(url).digest('hex')
 }
 
-export async function paylinksSync(
+export function paylinksSync(serverUrl: string, token: string, body: unknown): Promise<Record<string, unknown>> {
+  return paylinksCall('sync', serverUrl, token, body)
+}
+
+/** 管理接口：客户账号增删改、总览、链接明细、收回（同样用同步密钥认证） */
+export function paylinksAdmin(serverUrl: string, token: string, body: unknown): Promise<Record<string, unknown>> {
+  return paylinksCall('admin', serverUrl, token, body)
+}
+
+async function paylinksCall(
+  action: 'sync' | 'admin',
   serverUrl: string,
   token: string,
   body: unknown
@@ -19,7 +29,7 @@ export async function paylinksSync(
   const base = serverUrl.trim().replace(/\/+$/, '')
   if (!/^https:\/\//i.test(base)) throw new Error('网站地址必须以 https:// 开头')
   if (!token.trim()) throw new Error('缺少同步密钥')
-  const res = await httpRequest(`${base}/api.php?action=sync`, {
+  const res = await httpRequest(`${base}/api.php?action=${action}`, {
     method: 'POST',
     headers: {
       accept: 'application/json',

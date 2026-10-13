@@ -6,6 +6,8 @@ declare(strict_types=1);
 require __DIR__ . '/inc/lib.php';
 require __DIR__ . '/inc/client.php';
 require __DIR__ . '/inc/sync.php';
+require __DIR__ . '/inc/admin.php';
+require __DIR__ . '/inc/orders.php';
 
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
@@ -17,9 +19,11 @@ try {
         'logout' => action_logout(),
         'state' => action_state(),
         'claim' => action_claim(),
+        'replace' => action_replace(),
         'release' => action_release(),
         'export_paid' => action_export_paid(),
         'sync' => action_sync(),
+        'admin' => action_admin(),
         default => fail('未知操作', 404),
     };
 } catch (Throwable $e) {

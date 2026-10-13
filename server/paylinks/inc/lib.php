@@ -41,9 +41,13 @@ function json_out(array $data, int $status = 200): never
     exit;
 }
 
-function fail(string $message, int $status = 400): never
+/**
+ * 出错返回。code 是给网页翻译用的错误码（中 / 英 / 乌兹别克语），error 是中文原文，
+ * 桌面端与日志直接看 error。
+ */
+function fail(string $message, int $status = 400, string $code = ''): never
 {
-    json_out(['ok' => false, 'error' => $message], $status);
+    json_out(['ok' => false, 'error' => $message, 'code' => $code], $status);
 }
 
 /** 请求体 JSON */
@@ -76,20 +80,44 @@ function start_session(): void
     session_start();
 }
 
-function logged_in(): bool
+/**
+ * 当前登录的客户；没登录、账号被停用或删掉、密码被重置过（session_version 变了）都返回 null。
+ * 每个请求都回库对一次，管理端改了账号立刻生效，不用等会话过期。
+ */
+function current_client(): ?array
 {
+    static $client = false;
+    if ($client !== false) return $client;
     start_session();
-    return !empty($_SESSION['user']);
+    $id = (int) ($_SESSION['client_id'] ?? 0);
+    $client = null;
+    if ($id) {
+        $stmt = db()->prepare('SELECT * FROM clients WHERE id = ?');
+        $stmt->execute([$id]);
+        $row = $stmt->fetch() ?: null;
+        if ($row && $row['enabled'] && (int) $row['session_version'] === (int) ($_SESSION['session_version'] ?? -1)) {
+            $client = $row;
+        }
+    }
+    return $client;
 }
 
-function require_login(): void
+function logged_in(): bool
 {
-    if (!logged_in()) fail('请先登录', 401);
+    return current_client() !== null;
+}
+
+/** 返回当前客户；未登录直接 401 */
+function require_login(): array
+{
+    $client = current_client();
+    if (!$client) fail('请先登录', 401, 'login_required');
     // 写操作校验 CSRF：页面加载时拿到 token，请求头带回来
     if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
         $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
-        if (!hash_equals($_SESSION['csrf'] ?? '', $token)) fail('页面已过期，请刷新', 403);
+        if (!hash_equals($_SESSION['csrf'] ?? '', $token)) fail('页面已过期，请刷新', 403, 'csrf');
     }
+    return $client;
 }
 
 function csrf_token(): string
@@ -117,12 +145,15 @@ function require_sync_token(): void
  */
 function release_timeouts(): int
 {
-    $minutes = (int) (config()['claim_timeout_minutes'] ?? 180);
+    // 每个客户可以单独设领取时限；没归属的（老数据）用 config 里的默认值
+    $fallback = (int) (config()['claim_timeout_minutes'] ?? 180);
     $stmt = db()->prepare(
-        "UPDATE links SET status = 'refresh', refresh_reason = 'timeout', updated_at = ?
-         WHERE status = 'claimed' AND claimed_at < DATE_SUB(?, INTERVAL ? MINUTE)"
+        "UPDATE links l LEFT JOIN clients c ON c.id = l.client_id
+         SET l.status = 'refresh', l.refresh_reason = 'timeout', l.updated_at = ?
+         WHERE l.status = 'claimed'
+           AND l.claimed_at < DATE_SUB(?, INTERVAL COALESCE(c.claim_timeout_minutes, ?) MINUTE)"
     );
-    $stmt->execute([now(), now(), $minutes]);
+    $stmt->execute([now(), now(), $fallback]);
     return $stmt->rowCount();
 }
 
@@ -243,4 +274,46 @@ function apply_stripe_statuses(array $statuses): array
         $count[$next]++;
     }
     return $count;
+}
+
+// ============ 订单批次 ============
+
+/** 付款数达到订单数的批次标记完成；任何改动链接状态的地方之后都调一次 */
+function close_done_orders(): int
+{
+    $stmt = db()->prepare(
+        "UPDATE orders o SET o.status = 'done', o.done_at = ?, o.updated_at = ?
+         WHERE o.status = 'open'
+           AND (SELECT COUNT(*) FROM links l WHERE l.order_id = o.id AND l.status = 'paid') >= o.quantity"
+    );
+    $stmt->execute([now(), now()]);
+    return $stmt->rowCount();
+}
+
+/**
+ * 限速：同一客户 3 秒内只能领 / 换一次。原子更新，两个页面同时点也只放过一个。
+ * 防的是客户乱点、连点把链接一下领空。
+ */
+function throttle_client(int $clientId, float $seconds = 3.0): void
+{
+    $stmt = db()->prepare(
+        "UPDATE clients SET last_action_at = NOW(3)
+         WHERE id = ? AND (last_action_at IS NULL OR last_action_at < DATE_SUB(NOW(3), INTERVAL ? MICROSECOND))"
+    );
+    $stmt->execute([$clientId, (int) ($seconds * 1000000)]);
+    if (!$stmt->rowCount()) fail('操作太快了，请稍等几秒再试', 429, 'too_fast');
+}
+
+/** 一个批次的统计：已领待付、已付、还能领多少 */
+function order_stats(int $orderId): array
+{
+    $row = db()->query(
+        "SELECT o.*,
+                (SELECT COUNT(*) FROM links l WHERE l.order_id = o.id AND l.status = 'paid') AS paid,
+                (SELECT COUNT(*) FROM links l WHERE l.order_id = o.id AND l.status IN ('claimed', 'checking')) AS holding
+         FROM orders o WHERE o.id = $orderId"
+    )->fetch();
+    if (!$row) return [];
+    $row['remaining'] = max(0, (int) $row['quantity'] - (int) $row['paid'] - (int) $row['holding']);
+    return $row;
 }

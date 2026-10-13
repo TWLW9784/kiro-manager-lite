@@ -13,9 +13,9 @@ document.getElementById('login').addEventListener('submit', async (e) => {
     })
     const data = await res.json().catch(() => ({}))
     if (data.ok) location.reload()
-    else err.textContent = data.error || '登录失败'
+    else err.textContent = tError(data, 'login_failed')
   } catch {
-    err.textContent = '网络错误，请重试'
+    err.textContent = t('network_error')
   } finally {
     btn.disabled = false
   }

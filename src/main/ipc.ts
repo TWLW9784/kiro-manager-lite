@@ -19,7 +19,7 @@ import {
   getSubscriptionPlans
 } from './kiroSubscription'
 import { checkCheckoutStatus } from './stripeCheckout'
-import { accountRef, paylinksSync, urlHash } from './paylinksSync'
+import { accountRef, paylinksAdmin, paylinksSync, urlHash } from './paylinksSync'
 import { startClipboardWatch, stopClipboardWatch } from './clipboardWatch'
 import { clearKiroSsoCache, readKiroAuthToken, readLocalKiroCredentials, ssoCacheFile } from './kiroAuth'
 import { restartKiroIde } from './kiroProcess'
@@ -359,6 +359,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   handle('paylinks:sync', async (_e, serverUrl: string, token: string, body: unknown) =>
     ok(await paylinksSync(serverUrl, token, body))
   )
+
+  handle('paylinks:admin', async (_e, serverUrl: string, token: string, body: unknown) => {
+    const op = String((body as { op?: unknown })?.op ?? '')
+    const result = await paylinksAdmin(serverUrl, token, body)
+    // 改客户账号这类写操作记进日志；只读查询不记
+    if (/^client_|^link_/.test(op)) {
+      const b = body as Record<string, unknown>
+      log('info', `[PaylinksAdmin] ${op} ${b.username ?? ''} ${b.id ?? ''} ${Array.isArray(b.ids) ? `${b.ids.length} 条` : ''}`.trim())
+    }
+    return ok(result)
+  })
 
   /** 只查 Stripe 结算会话状态：已付款 / 未付款 / 已失效，不需要账号凭证 */
   handle('accounts:checkout-status', async (_e, url: string) => ok(await checkCheckoutStatus(url)))

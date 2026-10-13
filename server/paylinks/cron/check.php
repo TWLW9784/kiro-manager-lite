@@ -29,6 +29,8 @@ $rows = db()->query(
 )->fetchAll();
 
 $count = $rows ? apply_stripe_statuses(stripe_statuses($rows)) : ['paid' => 0, 'checking' => 0, 'refresh' => 0];
+$closed = close_done_orders();
+if ($closed) echo "[" . now() . "] orders done: $closed\n";
 
 printf(
     "[%s] checked %d, paid %d, checking %d, refresh %d, timeout-released %d\n",

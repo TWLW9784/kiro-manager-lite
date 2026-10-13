@@ -309,6 +309,11 @@ export interface PaylinksSyncBody {
   supersede?: string[]
   /** 用 Kiro 档位确认过的「不能再付」链接：paid 付了，expired 失效 */
   resolve?: { url_hash: string; result: 'paid' | 'expired' }[]
+  /**
+   * 换新时 Kiro 返回了同一个 Checkout Session（链接没变），把这些重新上架。
+   * 不发的话这行会一直停在 refresh，桌面端每轮都重试一次，变成死循环。
+   */
+  relist?: string[]
 }
 
 /** 网站返回的一条链接状态 */
@@ -329,6 +334,8 @@ export interface PaylinksSyncResult {
   now: string
   stats: { inserted: number; superseded: number; resolved: number }
   links: PaylinksServerLink[]
+  /** 进行中批次的缺口：{档位: 池子里还差几条}；桌面端按这个自动提取 */
+  shortage?: Record<string, number> | unknown[]
 }
 
 /** 回收站里的一条：删除时的完整账号快照 + 删除时间 */

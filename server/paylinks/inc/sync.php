@@ -5,6 +5,7 @@
 //   upsert:    [{url, account_ref, tier, amount_due, amount_cny, list_price, extracted_at}]  新提取的链接
 //   supersede: [url_hash]                       已被桌面端新链接替换的旧链接
 //   resolve:   [{url_hash, result: paid|expired}]  桌面端用 Kiro 档位确认过的 checking 链接
+//   relist:    [url_hash]                       换新时 Kiro 返回了同一个会话，链接没变，放回可领取
 // 返回：所有未结束的链接（available / claimed / checking / refresh）+ 最近 3 天付款的，
 //      桌面端据此换新链接、确认付款、同步标记。
 declare(strict_types=1);
@@ -17,7 +18,7 @@ function action_sync(): never
     $in = body();
     $pdo = db();
     $t = now();
-    $stats = ['inserted' => 0, 'superseded' => 0, 'resolved' => 0];
+    $stats = ['inserted' => 0, 'superseded' => 0, 'resolved' => 0, 'relisted' => 0];
 
     $insert = $pdo->prepare(
         "INSERT IGNORE INTO links (url_hash, url, account_ref, tier, amount_due, amount_cny, list_price,
@@ -62,11 +63,54 @@ function action_sync(): never
         $stats['resolved'] += $resolve->rowCount();
     }
 
+    /*
+     * 换不出新链接、但旧链接还能付：重新上架。
+     *
+     * 实测 Kiro 的 GenerateSubscriptionManagementUrl 对同一个账号常常返回同一个 Checkout Session，
+     * 于是「换新」拿到的 url 和旧的一模一样，INSERT IGNORE 跳过、这行一直停在 refresh，
+     * 桌面端每轮都再试一次，变成死循环。桌面端发现 url 没变就发 relist，这里放回可领取。
+     */
+    $relist = $pdo->prepare(
+        "UPDATE links SET status = 'available', refresh_reason = NULL, client_id = NULL,
+                claimed_at = NULL, claim_batch = NULL, updated_at = ?
+         WHERE url_hash = ? AND status = 'refresh'"
+    );
+    foreach ((array) ($in['relist'] ?? []) as $hash) {
+        if (!is_string($hash) || !preg_match('/^[a-f0-9]{64}$/', $hash)) continue;
+        $relist->execute([$t, $hash]);
+        $stats['relisted'] = ($stats['relisted'] ?? 0) + $relist->rowCount();
+    }
+
     $links = $pdo->query(
         "SELECT url_hash, account_ref, tier, amount_due, status, refresh_reason, claimed_at, paid_at, stripe_status
          FROM links WHERE status IN ('available', 'claimed', 'checking', 'refresh')
             OR (status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL 3 DAY))"
     )->fetchAll();
 
-    json_out(['ok' => true, 'now' => $t, 'stats' => $stats, 'links' => $links]);
+    close_done_orders();
+
+    /*
+     * 缺口：进行中的批次还要多少条 − 池子里同档位可领的。桌面端按这个数自动提取，
+     * 派了单、池子不够时不用人去点「开始提取」。
+     */
+    $demand = $pdo->query(
+        "SELECT o.tier,
+                GREATEST(0, SUM(o.quantity) - SUM(COALESCE(x.paid, 0)) - SUM(COALESCE(x.holding, 0))) AS need
+         FROM orders o LEFT JOIN (
+           SELECT order_id, SUM(status = 'paid') AS paid, SUM(status IN ('claimed', 'checking')) AS holding
+           FROM links WHERE order_id IS NOT NULL GROUP BY order_id
+         ) x ON x.order_id = o.id
+         WHERE o.status = 'open' GROUP BY o.tier"
+    )->fetchAll();
+    $pool = [];
+    foreach ($pdo->query("SELECT tier, COUNT(*) AS n FROM links WHERE status = 'available' GROUP BY tier") as $r) {
+        $pool[$r['tier']] = (int) $r['n'];
+    }
+    $shortage = [];
+    foreach ($demand as $d) {
+        $gap = (int) $d['need'] - ($pool[$d['tier']] ?? 0);
+        if ($gap > 0) $shortage[$d['tier']] = $gap;
+    }
+
+    json_out(['ok' => true, 'now' => $t, 'stats' => $stats, 'links' => $links, 'shortage' => $shortage]);
 }

@@ -1,0 +1,136 @@
+<script setup lang="ts">
+/**
+ * 新建 / 编辑网站客户。改密码或停用会让该客户已登录的页面立即失效。
+ * 保存后把账号密码组合好给出复制按钮，直接发给客户。
+ */
+import { computed, ref } from 'vue'
+import { message } from 'ant-design-vue'
+import { CopyOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons-vue'
+import { copyText } from '@/utils/ui'
+import { paylinksAdmin, randomPassword, type AdminClient } from '@/utils/paylinksAdmin'
+
+const props = defineProps<{ client: AdminClient | null; siteUrl: string }>()
+const emit = defineEmits<{ close: []; saved: [] }>()
+
+const editing = computed(() => !!props.client)
+const username = ref(props.client?.username ?? '')
+const displayName = ref(props.client?.display_name ?? '')
+const password = ref(props.client ? '' : randomPassword())
+const enabled = ref(props.client ? !!props.client.enabled : true)
+const maxClaim = ref(props.client?.max_claim ?? 50)
+const timeout = ref(props.client?.claim_timeout_minutes ?? 180)
+const note = ref(props.client?.note ?? '')
+const saving = ref(false)
+/** 保存成功后显示可复制的登录信息 */
+const savedInfo = ref('')
+
+async function save(): Promise<void> {
+  if (!/^[A-Za-z0-9_.-]{3,32}$/.test(username.value.trim())) {
+    return void message.warning('账号只能用 3-32 位字母、数字、_ . -')
+  }
+  if (!editing.value && password.value.length < 8) return void message.warning('密码至少 8 位')
+  if (editing.value && password.value && password.value.length < 8) return void message.warning('密码至少 8 位')
+  saving.value = true
+  try {
+    await paylinksAdmin.saveClient({
+      id: props.client?.id,
+      username: username.value.trim(),
+      password: password.value || undefined,
+      display_name: displayName.value.trim(),
+      enabled: enabled.value,
+      max_claim: Number(maxClaim.value) || 50,
+      claim_timeout_minutes: Number(timeout.value) || 180,
+      note: note.value.trim()
+    })
+    emit('saved')
+    if (password.value) {
+      savedInfo.value = `网址：${props.siteUrl}\n账号：${username.value.trim()}\n密码：${password.value}`
+      message.success(editing.value ? '已保存，新密码已生效' : '客户已创建')
+    } else {
+      message.success('已保存')
+      emit('close')
+    }
+  } catch (e) {
+    message.error(e instanceof Error ? e.message : String(e))
+  } finally {
+    saving.value = false
+  }
+}
+</script>
+
+<template>
+  <a-modal :open="true" width="520px" centered :footer="null" @cancel="emit('close')">
+    <template #title>
+      <span class="title"><UserOutlined />{{ editing ? `编辑客户 · ${props.client?.username}` : '新建客户' }}</span>
+    </template>
+
+    <template v-if="!savedInfo">
+      <a-form layout="vertical">
+        <div class="grid">
+          <a-form-item label="登录账号" required>
+            <a-input v-model:value="username" placeholder="字母、数字、_ . -" :maxlength="32" />
+          </a-form-item>
+          <a-form-item label="显示名称">
+            <a-input v-model:value="displayName" placeholder="网页右上角显示，可留空" :maxlength="64" />
+          </a-form-item>
+        </div>
+        <a-form-item :label="editing ? '新密码（留空不改）' : '密码'" :required="!editing">
+          <a-input v-model:value="password" :placeholder="editing ? '不改就留空' : '至少 8 位'">
+            <template #suffix>
+              <a-tooltip title="随机生成">
+                <ReloadOutlined class="gen" @click="password = randomPassword()" />
+              </a-tooltip>
+            </template>
+          </a-input>
+        </a-form-item>
+        <div class="grid">
+          <a-form-item label="单次最多领取">
+            <a-input-number v-model:value="maxClaim" :min="1" :max="500" :precision="0" addon-after="条" style="width: 100%" />
+          </a-form-item>
+          <a-form-item label="领走未付多久收回">
+            <a-input-number v-model:value="timeout" :min="10" :max="10080" :precision="0" addon-after="分钟" style="width: 100%" />
+          </a-form-item>
+        </div>
+        <a-form-item label="备注（只有你能看到）">
+          <a-input v-model:value="note" :maxlength="255" />
+        </a-form-item>
+        <a-form-item>
+          <a-checkbox v-model:checked="enabled">启用（停用后客户立即被登出、不能再登录）</a-checkbox>
+        </a-form-item>
+      </a-form>
+      <div class="footer">
+        <a-button @click="emit('close')">取消</a-button>
+        <a-button type="primary" :loading="saving" @click="save">保存</a-button>
+      </div>
+    </template>
+
+    <template v-else>
+      <a-alert type="success" show-icon message="把下面的登录信息发给客户。密码只在这里显示这一次，网站上存的是加密后的，找回不了。" />
+      <pre class="info">{{ savedInfo }}</pre>
+      <div class="footer">
+        <a-button @click="emit('close')">完成</a-button>
+        <a-button type="primary" @click="copyText(savedInfo, '登录信息已复制')">
+          <template #icon><CopyOutlined /></template>
+          复制登录信息
+        </a-button>
+      </div>
+    </template>
+  </a-modal>
+</template>
+
+<style scoped>
+.title { display: inline-flex; align-items: center; gap: 8px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
+.gen { cursor: pointer; color: var(--kal-muted); }
+.gen:hover { color: var(--kal-primary); }
+.info {
+  margin: 12px 0 0;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--kal-block-bg);
+  font-family: ui-monospace, Consolas, monospace;
+  white-space: pre-wrap;
+  user-select: all;
+}
+.footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+</style>

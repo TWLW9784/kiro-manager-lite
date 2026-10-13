@@ -45,6 +45,11 @@ label { display: inline-flex; align-items: center; gap: 6px; }
 .login-wrap { min-height: 100vh; display: grid; place-items: center; padding: 20px; }
 .login-card { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; }
 .login-card label { flex-direction: column; align-items: stretch; gap: 4px; }
+.login-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+select.lang {
+  background: #0f141d; color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; font: inherit; cursor: pointer;
+}
 
 /* 主界面 */
 .app { max-width: 1400px; margin: 0 auto; padding: 18px; display: flex; flex-direction: column; gap: 16px; }
@@ -111,3 +116,44 @@ tr.soon td.time { color: var(--danger); }
   opacity: 0; transition: opacity 0.2s; pointer-events: none;
 }
 .toast.show { opacity: 1; }
+
+/* ============ 批次 ============ */
+.orders { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.order {
+  border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.order.closed { opacity: 0.6; }
+.order-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.order-claim { display: flex; gap: 8px; }
+.order-claim input { width: 80px; }
+.bar { height: 6px; border-radius: 3px; background: #222a3a; overflow: hidden; }
+.bar span { display: block; height: 100%; background: var(--ok); transition: width 0.3s; }
+.tag.ok { color: var(--ok); }
+.small-btn { padding: 3px 10px; font-size: 12px; }
+.c-batch { width: 92px; }
+.c-act { width: 70px; }
+
+/* ============ 手机 ============ */
+@media (max-width: 720px) {
+  .app { padding: 10px; gap: 10px; }
+  .card { padding: 12px; border-radius: 12px; }
+  h1 { font-size: 18px; }
+  .head { gap: 10px; }
+  .stats { gap: 6px; width: 100%; }
+  .stat { min-width: 0; flex: 1 1 calc(50% - 6px); padding: 8px; }
+  .stat b { font-size: 20px; }
+  .btn { padding: 9px 14px; }
+  .actions .btn { flex: 1 1 auto; }
+  .orders { grid-template-columns: 1fr; }
+  .order-claim input { flex: 1 1 auto; width: auto; }
+  .table-wrap { max-height: none; border: 0; }
+  /* 表格改成一条一张卡片：表头藏掉，每行按块排 */
+  table, tbody, tr, td { display: block; width: 100%; }
+  thead { display: none; }
+  tr { border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; padding: 8px 10px; position: relative; }
+  td { border: 0; padding: 3px 0; }
+  td.url { font-size: 11px; }
+  tr td:first-child:has(input[type=checkbox]) { position: absolute; top: 8px; right: 8px; width: auto; }
+  input[type=checkbox] { width: 20px; height: 20px; }
+}

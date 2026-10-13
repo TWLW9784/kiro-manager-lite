@@ -8,10 +8,12 @@ import { computed, ref } from 'vue'
 import {
   CloudSyncOutlined,
   CreditCardOutlined,
+  GlobalOutlined,
   SyncOutlined,
   UnorderedListOutlined
 } from '@ant-design/icons-vue'
 import PaylinksSyncModal from '@/components/accounts/PaylinksSyncModal.vue'
+import PaylinksAdminPane from '@/components/paylinks/PaylinksAdminPane.vue'
 import { formatDateTime } from '@/utils/format'
 import { paylinksSyncState } from '@/utils/paylinksSync'
 import PaymentLinkExtractPane from '@/components/accounts/PaymentLinkExtractPane.vue'
@@ -23,7 +25,7 @@ const accountsStore = useAccountsStore()
 /** 顶栏控件尺寸跟随设置里的「控件尺寸」，与账户管理那一排一致 */
 const settingsStore = useSettingsStore()
 
-const tab = ref<'extract' | 'records'>('extract')
+const tab = ref<'extract' | 'records' | 'admin'>('extract')
 const extracting = ref(false)
 
 const freeCount = computed(() => accountsStore.stats.bySubscription.Free)
@@ -53,6 +55,10 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
         <a-radio-button value="records">
           <UnorderedListOutlined />
           提取记录
+        </a-radio-button>
+        <a-radio-button value="admin">
+          <GlobalOutlined />
+          网站管理
         </a-radio-button>
       </a-radio-group>
       <span class="spacer" />
@@ -84,6 +90,7 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
         @show-records="tab = 'records'"
       />
       <PaymentLinkRecordsPane v-show="tab === 'records'" :active="tab === 'records'" />
+      <PaylinksAdminPane v-if="tab === 'admin'" :active="tab === 'admin'" @open-sync="syncOpen = true" />
     </div>
     <PaylinksSyncModal v-if="syncOpen" @close="syncOpen = false" />
   </div>

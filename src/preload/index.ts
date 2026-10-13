@@ -70,6 +70,8 @@ const api = {
   paylinksHashes: (input: unknown) => invoke('paylinks:hashes', input),
   paylinksSync: (serverUrl: string, token: string, body: unknown) =>
     invoke('paylinks:sync', serverUrl, token, body),
+  paylinksAdmin: (serverUrl: string, token: string, body: unknown) =>
+    invoke('paylinks:admin', serverUrl, token, body),
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) =>
     invoke('app:open-in-app-browser', url, title),

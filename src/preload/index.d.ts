@@ -194,6 +194,12 @@ export interface Api {
     accountIds?: string[]
     urls?: string[]
   }) => Promise<IpcResult<{ accountRefs: Record<string, string>; urlHashes: Record<string, string> }>>
+  /** 代付链接网站管理接口：body.op 决定操作，返回结构见 server/paylinks/inc/admin.php */
+  paylinksAdmin: (
+    serverUrl: string,
+    token: string,
+    body: { op: string } & Record<string, unknown>
+  ) => Promise<IpcResult<Record<string, unknown>>>
   /** 代付链接网站：推送 / 下架 / 回报，返回网站上的最新状态 */
   paylinksSync: (
     serverUrl: string,

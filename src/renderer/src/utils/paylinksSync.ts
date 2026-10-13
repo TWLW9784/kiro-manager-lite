@@ -14,6 +14,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { isPaidSubscription, paymentLinkTier } from '@shared/paymentLink'
 import type { Account, PaylinksServerLink, PaylinksSyncBody, PaylinksUpsert } from '@shared/types'
 import { auditEmails } from './audit'
+import { fillShortage } from './paylinksAutoExtract'
 import {
   extractPaymentLink,
   linkCny,
@@ -39,6 +40,16 @@ let busy = false
 /** 下一轮要带上的回报：checking 链接确认后的结果、要下架的旧链接 */
 let pendingResolve: NonNullable<PaylinksSyncBody['resolve']> = []
 let pendingSupersede: string[] = []
+let pendingRelist: string[] = []
+/**
+ * 每条链接换新试了几次。
+ *
+ * Kiro 的 GenerateSubscriptionManagementUrl 常常对同一个账号返回同一个 Checkout Session，
+ * 换出来的链接和旧的一样，网站上那行就一直停在 refresh。没有上限的话每轮都会再试一次，
+ * 而每次都要走一遍门户 + Stripe 请求。超过上限就只上架旧链接、不再换了。
+ */
+const refreshTries = new Map<string, number>()
+const MAX_REFRESH_TRIES = 2
 
 function schedule(ms: number): void {
   if (timer) clearTimeout(timer)
@@ -131,11 +142,17 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
     })
   }
 
-  const body: PaylinksSyncBody = { upsert, supersede: [...supersede], resolve: pendingResolve }
+  const body: PaylinksSyncBody = {
+    upsert,
+    supersede: [...supersede],
+    resolve: pendingResolve,
+    relist: pendingRelist
+  }
   const res = await window.api.paylinksSync(serverUrl, token, body)
   if (!res.success || !res.data) throw new Error(res.error || '同步失败')
   pendingResolve = []
   pendingSupersede = []
+  pendingRelist = []
 
   // 回写：推上去的记下哈希；网站上的状态写回本地标记
   const byRef = new Map<string, Account>()
@@ -180,7 +197,15 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
   const setting = readDiscountSetting()
   const nowMs = Date.now()
   let budget = MAX_REEXTRACT_PER_ROUND
-  const summary = { pushed: upsert.length, refreshed: 0, optimized: 0, confirmedPaid: 0, confirmedExpired: 0, dropped: 0 }
+  const summary = {
+    pushed: upsert.length,
+    refreshed: 0,
+    optimized: 0,
+    confirmedPaid: 0,
+    confirmedExpired: 0,
+    dropped: 0,
+    relisted: 0
+  }
   const refreshedEmails: string[] = []
 
   for (const [id, item] of serverByAccount) {
@@ -203,15 +228,34 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
     const needRefresh = item.status === 'refresh'
     const needOptimize = item.status === 'available' && isWorthOptimizing(account, item, nowMs)
     if ((!needRefresh && !needOptimize) || budget <= 0) continue
+
+    // 试过几次都换不出新链接：旧链接还能付，直接重新上架，不再浪费请求
+    const tries = refreshTries.get(item.url_hash) ?? 0
+    if (needRefresh && tries >= MAX_REFRESH_TRIES) {
+      pendingRelist.push(item.url_hash)
+      summary.relisted++
+      continue
+    }
+
     const target = tierTarget(account)
     if (!target) continue
     budget--
+    const before = account.paymentLink.url
     const result = await extractPaymentLink(id, target, setting)
-    if (result.state === 'ok') {
+    const after = store.get(id)?.paymentLink?.url
+    if (result.state === 'ok' && after && after !== before) {
       // 新链接下一轮推上去，旧的同时下架
+      refreshTries.delete(item.url_hash)
       if (needRefresh) summary.refreshed++
       else summary.optimized++
       refreshedEmails.push(account.email)
+    } else if (result.state === 'ok') {
+      // Kiro 又给了同一个会话：链接没变，记一次失败，到上限就重新上架
+      refreshTries.set(item.url_hash, tries + 1)
+      if (needRefresh && tries + 1 >= MAX_REFRESH_TRIES) {
+        pendingRelist.push(item.url_hash)
+        summary.relisted++
+      }
     } else if (needRefresh && result.state === 'skip') {
       // 换不了新的（没有优惠了、已经订阅了）：网站上的旧链接直接下架，不再挂着
       pendingSupersede.push(item.url_hash)
@@ -225,14 +269,29 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
     summary.optimized && `价格优化 ${summary.optimized}`,
     summary.confirmedPaid && `确认已付 ${summary.confirmedPaid}`,
     summary.confirmedExpired && `确认失效 ${summary.confirmedExpired}`,
-    summary.dropped && `下架 ${summary.dropped}`
-  ].filter(Boolean)
+    summary.dropped && `下架 ${summary.dropped}`,
+    summary.relisted && `原链接重新上架 ${summary.relisted}`
+  ].filter((x): x is string => !!x)
+  // 派了单、池子不够：按缺口自动提取（并发 10），提出来的下一轮推上去
+  const shortage = res.data.shortage
+  let filled = 0
+  if (shortage && !Array.isArray(shortage) && Object.keys(shortage).length) {
+    const r = await fillShortage(shortage as Record<string, number>)
+    filled = r.ok
+    if (r.tried) parts.push(`按派单缺口自动提取 ${r.ok}/${r.tried}`)
+  }
+
   paylinksSyncState.value.lastSummary = parts.length ? parts.join('，') : '无变化'
   if (parts.length) {
     auditEmails('info', 'PaylinksSync', `网站同步：${parts.join('，')}`, refreshedEmails)
   }
   // 有回报 / 下架没发出去，或者刚换了新链接要推上去：尽快再来一轮
-  return pendingResolve.length > 0 || pendingSupersede.length > 0 || summary.refreshed + summary.optimized > 0
+  return (
+    pendingResolve.length > 0 ||
+    pendingSupersede.length > 0 ||
+    pendingRelist.length > 0 ||
+    summary.refreshed + summary.optimized + filled > 0
+  )
 }
 
 /** 网站上显示的档位名：pro / pro+ / promax / power */
