@@ -1334,6 +1334,9 @@ export type AccountExportFormat = 'json' | 'oidc' | 'kami' | 'csv' | 'txt' | 'cl
 /** 主题风格：auto 跟随系统明暗，light / dark 固定 */
 export type ThemeMode = 'auto' | 'light' | 'dark'
 
+/** 布局风格：side 左侧导航栏，top 顶部导航栏 */
+export type LayoutMode = 'side' | 'top'
+
 /** 默认主题色：紫罗兰 */
 export const DEFAULT_PRIMARY_COLOR = '#7c3aed'
 
@@ -1345,6 +1348,8 @@ export interface AppSettings {
    * 主进程读设置时按 darkMode 换算成 light / dark（见 store.getSettings），保持原有明暗。
    */
   themeMode: ThemeMode
+  /** 布局风格：左右（导航在左侧）或上下（导航在顶部） */
+  layoutMode: LayoutMode
   /**
    * 全局控件尺寸。
    * large 是本应用的默认观感（按钮、输入框都偏大，信息密度低但好点）；
@@ -1448,6 +1453,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   primaryColor: DEFAULT_PRIMARY_COLOR,
   themeMode: 'auto',
+  layoutMode: 'side',
   // 保持既有观感：老用户升级上来不会突然变小
   componentSize: 'large',
   accountDisplayMode: 'card',

@@ -1,72 +1,17 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import {
-  HomeOutlined,
-  TeamOutlined,
-  CreditCardOutlined,
-  KeyOutlined,
-  CloudServerOutlined,
-  ToolOutlined,
-  FileTextOutlined,
-  SettingOutlined,
-  InfoCircleOutlined,
-  MenuFoldOutlined,
-  MenuUnfoldOutlined,
-  BulbOutlined,
-  BulbFilled
-} from '@ant-design/icons-vue'
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons-vue'
 import kiroLogo from '@/assets/kiro-logo.png'
+import ThemeModeIcon from '@/components/common/ThemeModeIcon.vue'
 import { useSettingsStore } from '@/stores/settings'
-import { useAccountsStore } from '@/stores/accounts'
-import { useKeysStore } from '@/stores/keys'
 import { useUpdateStore } from '@/stores/update'
+import { useAppNav } from './useAppNav'
 
-const route = useRoute()
-const router = useRouter()
 const settingsStore = useSettingsStore()
-const accountsStore = useAccountsStore()
-const keysStore = useKeysStore()
 const updateStore = useUpdateStore()
+const { items, selectedKeys, navigate, goHome, darkModeLabel, toggleDark } = useAppNav()
 
 const collapsed = computed(() => settingsStore.settings.sidebarCollapsed)
-const selectedKeys = computed(() => [route.name as string])
-
-function navigate(info: { key: string | number }): void {
-  void router.push({ name: String(info.key) })
-}
-
-const accountCount = computed(() => accountsStore.stats.total)
-
-/*
- * 侧栏底部的快捷切换：按当前实际明暗翻到另一边，固定成浅色 / 深色。
- * 「自动」下点一次也会变成固定值，想回到跟随系统去设置页选「自动」。
- */
-const darkModeLabel = computed(() => (settingsStore.isDark ? '浅色模式' : '深色模式'))
-
-function toggleDark(): void {
-  void settingsStore.update({ themeMode: settingsStore.isDark ? 'light' : 'dark' })
-}
-
-const items = computed(() => [
-  { key: 'home', label: '主页', icon: HomeOutlined },
-  {
-    key: 'accounts',
-    label: accountCount.value ? `账户管理（${accountCount.value}个）` : '账户管理',
-    icon: TeamOutlined
-  },
-  { key: 'subscriptions', label: '新订阅管理', icon: CreditCardOutlined },
-  {
-    key: 'keys',
-    label: keysStore.count ? `API Key 管理（${keysStore.count}个）` : 'API Key 管理',
-    icon: KeyOutlined
-  },
-  { key: 'proxy', label: '本地反代', icon: CloudServerOutlined },
-  { key: 'tools', label: '常用工具', icon: ToolOutlined },
-  { key: 'logs', label: '系统日志', icon: FileTextOutlined },
-  { key: 'settings', label: '设置', icon: SettingOutlined },
-  { key: 'about', label: '关于', icon: InfoCircleOutlined }
-])
 </script>
 
 <template>
@@ -76,19 +21,13 @@ const items = computed(() => [
     :style="{ width: collapsed ? '80px' : '228px' }"
   >
     <div class="sidebar-brand">
-      <a-tooltip
-        :title="updateStore.hasUpdate ? `发现新版本 v${updateStore.latestVersion}` : 'Kiro Manager Lite'"
-        placement="right"
-      >
-        <div
-          class="brand-logo-wrap"
-          :class="{ 'has-update': updateStore.hasUpdate }"
-          @click="updateStore.showModal"
-        >
-          <img class="brand-logo" :src="kiroLogo" alt="Kiro Manager Lite" />
-          <span v-if="updateStore.hasUpdate" class="brand-update-badge">新版本</span>
-        </div>
-      </a-tooltip>
+      <!-- 点 logo 回主页；点「新版本」角标打开更新弹窗 -->
+      <div class="brand-logo-wrap" role="link" aria-label="回到主页" @click="goHome">
+        <img class="brand-logo" :src="kiroLogo" alt="Kiro Manager Lite" />
+        <span v-if="updateStore.hasUpdate" class="brand-update-badge" @click.stop="updateStore.showModal">
+          新版本
+        </span>
+      </div>
     </div>
 
     <a-menu
@@ -112,9 +51,9 @@ const items = computed(() => [
           class="footer-btn"
           @click="toggleDark"
         >
+          <!-- 显示要切换到的那一边：深色时是太阳，浅色时是月亮，与设置里的主题风格图标同一套 -->
           <template #icon>
-            <BulbFilled v-if="settingsStore.isDark" />
-            <BulbOutlined v-else />
+            <ThemeModeIcon :mode="settingsStore.isDark ? 'light' : 'dark'" :size="16" class="theme-icon" />
           </template>
           <span v-if="!collapsed">{{ darkModeLabel }}</span>
         </a-button>
@@ -142,9 +81,6 @@ const items = computed(() => [
   position: relative;
   width: 34px;
   height: 34px;
-}
-
-.brand-logo-wrap.has-update {
   cursor: pointer;
 }
 

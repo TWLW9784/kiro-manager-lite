@@ -10,6 +10,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
+import dayjs, { type Dayjs } from 'dayjs'
 import {
   ArrowLeftOutlined,
   CopyOutlined,
@@ -318,8 +319,30 @@ const metricOptions = [
   { label: 'Tokens', value: 'tokens' }
 ]
 
-/** 最多画最近 30 天 */
-const DAY_SPAN = 30
+/** 最近 n 天（含今天） */
+function lastDays(n: number): [Dayjs, Dayjs] {
+  const today = dayjs().startOf('day')
+  return [today.subtract(n - 1, 'day'), today]
+}
+
+/** 默认看最近 7 天 */
+function defaultRange(): [Dayjs, Dayjs] {
+  return lastDays(7)
+}
+
+/** 每日统计的日期范围，两端都含；清空后回到默认的最近 7 天 */
+const dayRange = ref<[Dayjs, Dayjs]>(defaultRange())
+
+function onRangeChange(value: [Dayjs, Dayjs] | null): void {
+  dayRange.value = value ?? defaultRange()
+}
+
+/** 不能选今天以后：未来没有用量，选了只会画出一截 0 */
+function disabledFuture(current: Dayjs): boolean {
+  return current.isAfter(dayjs(), 'day')
+}
+
+const rangePresets = [7, 30, 90].map((n) => ({ label: `最近 ${n} 天`, value: lastDays(n) }))
 
 function dayKey(at: number): string {
   const d = new Date(at)
@@ -329,20 +352,16 @@ function dayKey(at: number): string {
 
 /**
  * 按天连续补齐：没用的那天也要有一个 0 点，否则折线会把两次使用之间的空档连成一条斜线，
- * 看起来像那几天也在持续消耗。从有数据的第一天画到今天，最多 30 天。
+ * 看起来像那几天也在持续消耗。范围由日期选择器决定，两端都含。
  */
 const days = computed(() => {
   const byDay = usage.value?.byDay ?? {}
-  const keysSorted = Object.keys(byDay).sort()
-  if (!keysSorted.length) return []
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const [y, m, d] = keysSorted[0].split('-').map(Number)
-  const first = new Date(y, m - 1, d).getTime()
-  const earliest = today.getTime() - (DAY_SPAN - 1) * 86_400_000
+  if (!Object.keys(byDay).length) return []
+  const [start, end] = dayRange.value
+  const last = end.startOf('day').toDate()
   const out: { day: string; stats: ProxyKeyStats }[] = []
   // 按日期对象步进而不是加 86400000：跨夏令时那天不是 24 小时
-  for (const cursor = new Date(Math.max(first, earliest)); cursor <= today; cursor.setDate(cursor.getDate() + 1)) {
+  for (const cursor = start.startOf('day').toDate(); cursor <= last; cursor.setDate(cursor.getDate() + 1)) {
     const key = dayKey(cursor.getTime())
     out.push({
       day: key,
@@ -373,11 +392,42 @@ const observer = new ResizeObserver((records) => {
   const width = records[0]?.contentRect.width
   if (width) chartWidth.value = width
 })
+/**
+ * 「按模型」「用量历史」两张表撑满弹窗剩余高度：量出各自容器的高度，
+ * 减去表头（与分页）后作为 scroll.y，表体在里面滚动，表头与分页始终可见。
+ */
+const TABLE_HEAD = 39
+const PAGINATION = 40
+const modelBox = ref<HTMLElement | null>(null)
+const recentBox = ref<HTMLElement | null>(null)
+const boxHeights = ref<Record<string, number>>({})
+const boxObserver = new ResizeObserver((records) => {
+  const next = { ...boxHeights.value }
+  for (const r of records) {
+    const id = (r.target as HTMLElement).dataset.box
+    if (id && r.contentRect.height) next[id] = r.contentRect.height
+  }
+  boxHeights.value = next
+})
+for (const box of [modelBox, recentBox]) {
+  watch(box, (el, prev) => {
+    if (prev) boxObserver.unobserve(prev)
+    if (el) boxObserver.observe(el)
+  })
+}
+const modelTableY = computed(() => Math.max(120, (boxHeights.value.model ?? 300) - TABLE_HEAD))
+const recentTableY = computed(() =>
+  Math.max(120, (boxHeights.value.recent ?? 300) - TABLE_HEAD - PAGINATION)
+)
+
 watch(chartBox, (el, prev) => {
   if (prev) observer.unobserve(prev)
   if (el) observer.observe(el)
 })
-onBeforeUnmount(() => observer.disconnect())
+onBeforeUnmount(() => {
+  observer.disconnect()
+  boxObserver.disconnect()
+})
 
 const plot = computed(() => {
   const list = days.value
@@ -688,8 +738,16 @@ const tab = ref<'daily' | 'model' | 'recent'>('daily')
         <a-tabs v-model:active-key="tab" size="small" class="detail-tabs">
           <a-tab-pane key="daily" tab="每日统计">
             <div class="chart-head">
-              <a-segmented v-model:value="metric" size="small" :options="metricOptions" />
-              <span class="muted">最近 {{ days.length }} 天</span>
+              <!-- 不写 size，跟随设置里的控件尺寸（默认 / 大尺寸） -->
+              <a-segmented v-model:value="metric" :options="metricOptions" />
+              <a-range-picker
+                :value="dayRange"
+                :allow-clear="false"
+                :disabled-date="disabledFuture"
+                :presets="rangePresets"
+                class="range-picker"
+                @change="(v: any) => onRangeChange(v)"
+              />
             </div>
             <div ref="chartBox" class="chart-box">
               <svg
@@ -759,13 +817,14 @@ const tab = ref<'daily' | 'model' | 'recent'>('daily')
           </a-tab-pane>
 
           <a-tab-pane key="model" tab="按模型">
+            <div ref="modelBox" data-box="model" class="fill-box">
             <a-table
               :columns="modelColumns"
               :data-source="modelRows"
               row-key="model"
               size="small"
               :pagination="false"
-              :scroll="{ y: 260 }"
+              :scroll="{ y: modelTableY }"
               :loading="usageLoading"
             >
               <template #bodyCell="{ column, record }">
@@ -784,16 +843,18 @@ const tab = ref<'daily' | 'model' | 'recent'>('daily')
               </template>
               <template #emptyText><span class="muted">还没有用量</span></template>
             </a-table>
+            </div>
           </a-tab-pane>
 
           <a-tab-pane key="recent" :tab="`用量历史（${recentRows.length}）`">
+            <div ref="recentBox" data-box="recent" class="fill-box">
             <a-table
               :columns="recentColumns"
               :data-source="recentRows"
               row-key="rowKey"
               size="small"
               :pagination="{ pageSize: 20, size: 'small', showSizeChanger: false, hideOnSinglePage: true }"
-              :scroll="{ y: 230 }"
+              :scroll="{ y: recentTableY }"
               :loading="usageLoading"
             >
               <template #bodyCell="{ column, record }">
@@ -826,7 +887,7 @@ const tab = ref<'daily' | 'model' | 'recent'>('daily')
               </template>
               <template #emptyText><span class="muted">还没有用量</span></template>
             </a-table>
-            <div class="muted foot-hint">只保留最近 500 条明细；总计与每日统计不受影响。</div>
+            </div>
           </a-tab-pane>
         </a-tabs>
       </template>
@@ -913,7 +974,6 @@ const tab = ref<'daily' | 'model' | 'recent'>('daily')
 .limit-cell { display: flex; flex-direction: column; gap: 2px; font-size: 12px; }
 .limit-cell :deep(.ant-progress) { margin: 0; line-height: 1; }
 
-.foot-hint { margin-top: 8px; font-size: 12px; }
 
 .detail-top {
   display: flex;
@@ -944,7 +1004,19 @@ const tab = ref<'daily' | 'model' | 'recent'>('daily')
 .stat-card strong { font-size: 20px; line-height: 1.3; }
 .stat-card .sub { font-size: 11px; }
 
+/* 标签页撑满详情剩余高度，内容区一路传下去，表格容器才能量到真实可用高度 */
 .detail-tabs { flex: 1; min-height: 0; margin-top: 8px; }
+.detail-tabs :deep(.ant-tabs-content-holder) { flex: 1; min-height: 0; }
+.detail-tabs :deep(.ant-tabs-content),
+.detail-tabs :deep(.ant-tabs-tabpane-active) { height: 100%; }
+.fill-box { height: 100%; overflow: hidden; }
+
+/*
+ * 日期范围不写死宽度：大尺寸下字号更大，两个 YYYY-MM-DD 会被截断。
+ * 留足最小宽度，日期按字符宽度自然撑开
+ */
+.range-picker { flex: 0 0 auto; min-width: 280px; }
+.range-picker :deep(.ant-picker-input > input) { min-width: 10ch; }
 
 .chart-head {
   display: flex;

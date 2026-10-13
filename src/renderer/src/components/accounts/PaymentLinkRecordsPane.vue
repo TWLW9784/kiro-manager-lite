@@ -509,26 +509,27 @@ function clearOne(account: Account): void {
 
 <template>
   <div class="pane">
+    <!-- 顶栏与账户管理同款：搜索框在左，筛选在右，控件尺寸跟随设置 -->
     <div class="toolbar">
-      <a-radio-group v-model:value="stateFilter" button-style="solid" size="small">
+      <a-input
+        v-model:value="keyword"
+        allow-clear
+        placeholder="搜索邮箱 / 昵称 / 备注"
+        class="search-input"
+      >
+        <template #prefix><SearchOutlined /></template>
+      </a-input>
+      <span class="spacer" />
+      <span v-if="checking" class="muted small">正在确认付款状态…</span>
+      <span v-else-if="lastCheckedAt" class="muted small">付款状态确认于 {{ formatDateTime(lastCheckedAt) }}</span>
+      <a-radio-group v-model:value="stateFilter" button-style="solid" :size="settingsStore.toolbarSize">
         <a-radio-button v-for="item in filterOptions" :key="item.value" :value="item.value">
           {{ item.label }}
         </a-radio-button>
       </a-radio-group>
-      <span class="spacer" />
-      <span v-if="checking" class="muted small">正在确认付款状态…</span>
-      <span v-else-if="lastCheckedAt" class="muted small">付款状态确认于 {{ formatDateTime(lastCheckedAt) }}</span>
-      <a-input
-        v-model:value="keyword"
-        allow-clear
-        size="small"
-        placeholder="搜索邮箱 / 昵称 / 备注"
-        style="width: 200px"
-      >
-        <template #prefix><SearchOutlined /></template>
-      </a-input>
     </div>
 
+    <a-card size="small" class="table-card" :body-style="{ padding: 0 }">
     <a-table
       :columns="columns"
       :data-source="visible"
@@ -604,6 +605,7 @@ function clearOne(account: Account): void {
         </template>
       </template>
     </a-table>
+    </a-card>
 
     <div class="footer">
       <!-- 主按钮先问 Stripe 再同步 Kiro；下拉里的「刷新 Kiro 订阅档位」用于在别处付过款的情况 -->
@@ -687,6 +689,10 @@ function clearOne(account: Account): void {
 <style scoped>
 .pane { display: flex; flex-direction: column; gap: 12px; }
 .toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+/* 搜索框宽度与账户管理一致 */
+.search-input { width: 100%; max-width: 360px; }
+/* 表格装进小卡片里，卡片圆角把表头的直角包住 */
+.table-card { overflow: hidden; }
 .footer { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .spacer { flex: 1 1 auto; }
 .muted { color: var(--kal-muted); }

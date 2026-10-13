@@ -23,6 +23,15 @@ body {
   height: 100%;
 }
 
+/* 上下布局：导航栏在上，内容区占满下方剩余高度 */
+.app-shell.layout-top {
+  flex-direction: column;
+}
+
+.app-shell.layout-top .app-body {
+  min-height: 0;
+}
+
 .app-sidebar {
   flex: 0 0 auto;
   display: flex;
@@ -76,6 +85,20 @@ body {
   width: 40px;
   padding-inline: 0;
   justify-content: center;
+}
+
+/* 明暗切换用的是自绘 SVG 而不是 antd 图标：垂直居中、与文字留出和图标字体一样的间距 */
+.theme-icon {
+  display: block;
+  flex: 0 0 auto;
+}
+
+.sidebar-footer .footer-btn .theme-icon {
+  margin-inline-end: 8px;
+}
+
+.app-sidebar.collapsed .sidebar-footer .footer-btn .theme-icon {
+  margin-inline-end: 0;
 }
 
 .app-sidebar.collapsed .sidebar-footer .footer-btn .ant-btn-icon,

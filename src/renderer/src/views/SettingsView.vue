@@ -20,8 +20,15 @@ import {
   type BackupCycle
 } from '@shared/backupSchedule'
 import { DEFAULT_SETTINGS } from '@shared/types'
-import type { AppSettings, BackupScheduleStatus, DataBackupSummary, ThemeMode } from '@shared/types'
+import type {
+  AppSettings,
+  BackupScheduleStatus,
+  DataBackupSummary,
+  LayoutMode,
+  ThemeMode
+} from '@shared/types'
 import ThemeModeIcon from '@/components/common/ThemeModeIcon.vue'
+import LayoutModeIcon from '@/components/common/LayoutModeIcon.vue'
 import {
   PORTAL_LOCALE_CUSTOM,
   PORTAL_LOCALE_PRESETS,
@@ -79,6 +86,11 @@ const themeModeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'auto', label: '自动' },
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' }
+]
+
+const layoutModeOptions: { value: LayoutMode; label: string }[] = [
+  { value: 'side', label: '左右布局' },
+  { value: 'top', label: '上下布局' }
 ]
 
 /** 主题色预设。色值沿用旧版的七个，老用户选过的颜色升级后仍能在这里对上、显示为选中 */
@@ -388,6 +400,24 @@ function resetAll(): void {
             </button>
           </div>
           <div class="choice-hint">选择界面的强调色，用于按钮、链接与选中态</div>
+        </a-form-item>
+        <a-form-item label="布局风格">
+          <div class="choice-group" role="radiogroup" aria-label="布局风格">
+            <button
+              v-for="opt in layoutModeOptions"
+              :key="opt.value"
+              type="button"
+              role="radio"
+              class="choice-card"
+              :class="{ selected: settings.layoutMode === opt.value }"
+              :aria-checked="settings.layoutMode === opt.value"
+              @click="update({ layoutMode: opt.value })"
+            >
+              <LayoutModeIcon :mode="opt.value" />
+              <span class="choice-label">{{ opt.label }}</span>
+            </button>
+          </div>
+          <div class="choice-hint">左右布局把导航放在左侧，上下布局把导航放到窗口顶部，内容区更宽</div>
         </a-form-item>
         <a-form-item label="控件尺寸">
           <a-radio-group

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { message } from 'ant-design-vue'
 import {
   AppstoreOutlined,
   CodeOutlined,
+  CrownOutlined,
   DeleteOutlined,
   DownOutlined,
   DownloadOutlined,
@@ -84,9 +86,11 @@ const recycleOpen = ref(false)
 const batchNoteOpen = ref(false)
 const batchGroupOpen = ref(false)
 const batchApiKeyOpen = ref(false)
+/** 批量提取订阅链接统一走「新订阅管理」：那边有新用户优惠判定、付款跟踪与失效重提 */
+const router = useRouter()
 
-/** 批量生成的目标：全部勾选项，按界面当前排序，被筛掉的勾选项排在后面 */
-const batchApiKeyTargets = computed(() => {
+/** 批量生成 Key / 订阅链接的目标：全部勾选项，按界面当前排序，被筛掉的勾选项排在后面 */
+const batchTargets = computed(() => {
   const selected = new Set(accountsStore.selectedIds)
   const visible = sorted.value.filter((account) => selected.has(account.id))
   const shown = new Set(visible.map((account) => account.id))
@@ -716,6 +720,10 @@ function logoutIde(account: Account): void {
                 <KeyOutlined />
                 批量生成 API Key
               </a-menu-item>
+              <a-menu-item key="subscription" @click="router.push({ name: 'subscriptions' })">
+                <CrownOutlined />
+                批量提取订阅链接（新订阅管理）
+              </a-menu-item>
             </a-menu>
           </template>
         </a-dropdown>
@@ -835,7 +843,7 @@ function logoutIde(account: Account): void {
     />
     <BatchCreateApiKeyModal
       v-if="batchApiKeyOpen"
-      :accounts="batchApiKeyTargets"
+      :accounts="batchTargets"
       @close="batchApiKeyOpen = false"
     />
     <GroupPickerModal

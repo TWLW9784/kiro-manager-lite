@@ -515,9 +515,9 @@ function tierOf(row: Row): string {
   <div class="pane">
     <!-- ============ 设置阶段 ============ -->
     <template v-if="!rows.length">
-      <div class="section">
-        <div class="section-head">
-          <span class="section-title">订阅档位</span>
+      <!-- 与主页 / 关于页同款的小卡片：标题在卡片头，右侧放这一块的动作 -->
+      <a-card size="small" title="订阅档位">
+        <template #extra>
           <a-button
             type="link"
             size="small"
@@ -528,7 +528,7 @@ function tierOf(row: Row): string {
             <template #icon><SyncOutlined /></template>
             重新获取
           </a-button>
-        </div>
+        </template>
 
         <div v-if="plansLoading && !plans.length" class="plans-stage">
           <a-spin />
@@ -576,9 +576,10 @@ function tierOf(row: Row): string {
           今天应付 = 月费 × 到重置日的剩余天数比例 − $20 新用户余额，按本批候选账号各自的重置日估算，
           提取时以 Stripe 实际金额为准。之后每月按原价续费。
         </div>
-      </div>
+      </a-card>
 
-      <!-- 以下三项统一成「左标签 + 右内容」的表单网格，标签宽度一致，控件上下对齐 -->
+      <!-- 提取设置：三项统一成「左标签 + 右内容」的表单网格，标签宽度一致，控件上下对齐 -->
+      <a-card size="small" title="提取设置">
       <div class="form-grid">
         <span class="form-label">优惠条件</span>
         <div class="form-field">
@@ -687,6 +688,7 @@ function tierOf(row: Row): string {
           </div>
         </div>
       </div>
+      </a-card>
 
       <div class="footer setup-footer">
         <span class="muted small footer-note">
@@ -702,10 +704,9 @@ function tierOf(row: Row): string {
 
     <!-- ============ 运行 / 结果阶段 ============ -->
     <template v-else>
+      <a-card size="small" :title="`提取进度 · ${runPlan?.title ?? ''}`">
       <div class="summary">
-        <span class="muted">
-          {{ runPlan?.title }} · 共 {{ rows.length }} 个 · {{ ruleText }}
-        </span>
+        <span class="muted">共 {{ rows.length }} 个 · {{ ruleText }}</span>
         <a-tag v-if="stat.ok" color="green" :bordered="false">成功 {{ stat.ok }}</a-tag>
         <a-tag v-if="stat.skip" :bordered="false">跳过 {{ stat.skip }}</a-tag>
         <a-tag v-if="stat.fail" color="red" :bordered="false">失败 {{ stat.fail }}</a-tag>
@@ -720,7 +721,7 @@ function tierOf(row: Row): string {
         :percent="Math.round(((stat.ok + stat.skip + stat.fail) / rows.length) * 100)"
         :status="running ? 'active' : stat.fail ? 'exception' : 'success'"
         size="small"
-        style="margin: 0"
+        style="margin: 8px 0 12px"
       />
       <div ref="listRef" class="row-list">
         <div
@@ -775,6 +776,7 @@ function tierOf(row: Row): string {
           </div>
         </div>
       </div>
+      </a-card>
 
       <div class="footer">
         <a-tooltip title="一行一个链接">
@@ -824,6 +826,7 @@ function tierOf(row: Row): string {
 </template>
 
 <style scoped>
+/* 与主页、关于页一致：块与块之间 16px，每块是独立的小卡片 */
 .pane { display: flex; flex-direction: column; gap: 16px; }
 .section { display: flex; flex-direction: column; gap: 10px; }
 .section-head { display: flex; align-items: center; gap: 8px; }
@@ -869,9 +872,6 @@ function tierOf(row: Row): string {
   grid-template-columns: 72px minmax(0, 1fr);
   align-items: start;
   gap: 14px 12px;
-  padding: 14px 16px;
-  border-radius: 12px;
-  background: var(--kal-block-bg);
 }
 .form-label { font-weight: 600; line-height: 32px; }
 .form-field { display: flex; flex-direction: column; gap: 10px; min-width: 0; }

@@ -14,7 +14,7 @@ import {
 import { useSettingsStore } from '@/stores/settings'
 import { useUpdateStore } from '@/stores/update'
 import kiroLogo from '@/assets/kiro-logo.png'
-import qqGroup from '@/assets/qq-group.jpg'
+import qqGroup from '@/assets/qq-group.png'
 import authorAvatar from '@/assets/author_avatar.jpg'
 import sponsorWechat from '@/assets/sponsor_wechat.jpg'
 import sponsorAlipay from '@/assets/sponsor_alipay.jpg'
@@ -57,7 +57,7 @@ const features = [
   { name: '一键切号', desc: '把账号凭证写入 Kiro IDE，落盘前实测 profileArn，可一键重启 IDE 生效' },
   { name: '刷新与续期', desc: 'Token 与用量各自定时刷新，IDE 当前账号的 Token 即将过期前主动续期写盘' },
   { name: '流式测活', desc: '真实对话测活，模型可搜索、二级可选推理档位，可查看官方完整原始返回' },
-  { name: '订阅与官网', desc: '订阅状态、可开通档位与 Stripe 账单页，内置私密浏览器免登录进 Kiro 官网后台' },
+  { name: '订阅与官网', desc: '订阅状态、可开通档位与 Stripe 账单页，可批量生成订阅链接；内置私密浏览器免登录进 Kiro 官网后台' },
   { name: '账号 API Key', desc: '用账号凭证向 Kiro 申请 API Key 并列出已创建的 Key' },
   { name: 'API Key 管理', desc: '管理 ksk_ 开头的 Kiro API Key，按区域同步额度、测活、查看积分历史' },
   { name: '本地反代', desc: '账号池转成 OpenAI / Anthropic / Gemini 兼容接口，轮询选号、重试换号、托管联网搜索' },
@@ -68,7 +68,7 @@ const features = [
   { name: '常用工具', desc: '机器码重置与恢复、出口 IP 与网站连通性检测、自动同意 AI 操作' },
   { name: '系统日志', desc: '主进程与界面日志同一时间线，按级别、分类、关键字与时间筛选并可导出' },
   { name: '隐私打码', desc: '一键遮住邮箱、昵称、API Key 与备注，截图录屏更安心' },
-  { name: '个性化设置', desc: '主题风格与主题色、控件尺寸、HTTP 代理、内置浏览器地区、定时备份与初始化' },
+  { name: '个性化设置', desc: '主题风格与主题色、左右 / 上下布局、控件尺寸、HTTP 代理、内置浏览器地区、定时备份与初始化' },
   { name: '桌面端体验', desc: '系统托盘常驻、关闭行为可配、自定义协议唤起、单实例锁' }
 ]
 
@@ -236,8 +236,7 @@ function open(url: string): void {
 
     <a-card size="small" title="致谢与许可" class="credits-card">
       <p class="muted" style="margin: 0 0 12px">
-        账户管理相关的接口实现参考了开源项目 Kiro-account-manager（AGPL-3.0），本项目在其基础上重写为
-        Vue 技术栈；本地反代的协议转换、工具调用与网关设计参考了以下开源项目。本项目以 AGPL-3.0 许可开源。
+        本项目以 AGPL-3.0 许可开源。感谢以下开源项目的先行探索，本项目在它们的基础上学习、借鉴与重新实现：
       </p>
       <ul class="feature-list">
         <li v-for="item in credits" :key="item.url" class="feature-item">

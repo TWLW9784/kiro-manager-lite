@@ -13,8 +13,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.0.36-6c5ce7" alt="version">
-  <img src="https://img.shields.io/badge/updated-2026--10--11-2f9e44" alt="updated">
+  <img src="https://img.shields.io/badge/version-1.0.37-6c5ce7" alt="version">
+  <img src="https://img.shields.io/badge/updated-2026--10--13-2f9e44" alt="updated">
   <img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="license">
   <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey" alt="platform">
   <img src="https://img.shields.io/badge/Vue-3-42b883" alt="vue">
@@ -47,7 +47,8 @@
 **账号 API Key**
 
 - 卡片上的钥匙图标直接用该账号凭证向 Kiro 控制面申请 Key，并列出它已创建的全部 Key（名称、前缀、创建时间）
-- 完整明文上游只在创建时返回一次，因此生成后单独弹窗展示并提供复制，未复制就关闭会二次确认；关闭后列表里只剩前缀
+- 完整明文上游只在创建时返回一次，因此生成后单独弹窗展示，可复制或一键添加到 API Key 管理；关闭后列表里只剩前缀
+- 批量生成：勾选多个账号后在「批量操作」里为每个账号各生成一个 Key，按顺序逐个执行、单个失败不影响后续，可中止与重试失败项；生成后可复制全部或通过批量导入添加到 API Key 管理
 
 **订阅管理**
 
@@ -55,6 +56,8 @@
 - 档位卡片显示名称、价格、计费周期与特性，并标出当前套餐；每个档位两个动作 —— 生成支付链接并用内置浏览器打开，或只把链接复制到剪贴板（想换个地方付款、先存下来都不用打开浏览器）
 - 查询前按需为该账号续期 Token：门户的订阅接口认的是 cookie 里的 AccessToken，而 IDE 只续它自己在用的那个账号
 - 查询失败就地显示原始报错并附「关闭 / 重试」，不必关掉重开
+- **批量生成订阅链接**：勾选多个账号后在「批量操作」里选一个订阅档位（用勾选的第一个账号向官方查询可开通档位），为每个账号逐个生成 Stripe 订阅链接；
+  已有订阅的账号判为失败，单个失败不影响后续，可中止与重试失败项。生成后每行可用内置浏览器打开或复制，也可下载 txt（`邮箱----订阅链接`）
 
 **前往官网**
 
@@ -110,7 +113,7 @@
 
 **Key 与统计**
 
-- 多个 `sk-` API Key：可命名、设积分额度，用完返回 429；每个 Key 有请求数、积分、Tokens、用量明细、按模型统计与每日折线图
+- 多个 `sk-` API Key：可命名、设积分额度，用完返回 429；每个 Key 有请求数、积分、Tokens、完整用量明细、按模型统计与每日折线图（默认最近 7 天，可自选日期范围）
 - 请求日志与统计持久化，按表格展示状态、协议、模型、账号、输入 / 输出 Tokens、耗时与积分，汇总消耗 Tokens 与消耗积分
 
 **一键接入客户端**
@@ -152,7 +155,7 @@
 
 ### ⚙️ 个性化设置
 
-- 主题风格（自动 / 浅色 / 深色）、主题色（7 种预设，默认紫罗兰）、控件尺寸（默认 / 大尺寸，两个列表页的工具栏那一排跟着一起变）、积分精度与删除前确认
+- 主题风格（自动 / 浅色 / 深色）、主题色（7 种预设，默认紫罗兰）、布局风格（左右布局 / 上下布局，上下布局把导航放到窗口顶部）、控件尺寸（默认 / 大尺寸，两个列表页的工具栏那一排跟着一起变）、积分精度与删除前确认
 - **隐私打码**：一键遮住邮箱、昵称、API Key、User ID 与备注，截图或录屏前很有用。
   邮箱的遮罩串由 md5 前缀生成，同一账号每次结果一致，打码状态下仍能横向比对是不是同一个号
 - **内置浏览器**：指定应用内打开的网页使用哪个地区，50 个常用地区可搜索选择，也可自定义 BCP 47 标签。
@@ -175,14 +178,14 @@
 
 <p align="center">
   <a href="https://github.com/lucks-cloud/kiro-manager-lite/releases/latest">
-    <img src="https://img.shields.io/badge/⬇%20下载最新版-v1.0.36-6c5ce7?style=for-the-badge" alt="下载最新版">
+    <img src="https://img.shields.io/badge/⬇%20下载最新版-v1.0.37-6c5ce7?style=for-the-badge" alt="下载最新版">
   </a>
   <a href="https://github.com/lucks-cloud/kiro-manager-lite/releases">
     <img src="https://img.shields.io/badge/全部版本-Releases-24292f?style=for-the-badge&logo=github" alt="全部版本">
   </a>
 </p>
 
-**最新版本：v1.0.36**（2026-10-11） · 变更详情见 [CHANGELOG.md](CHANGELOG.md)
+**最新版本：v1.0.37**（2026-10-13） · 变更详情见 [CHANGELOG.md](CHANGELOG.md)
 
 ### 选择对应的安装包
 
@@ -411,30 +414,24 @@ src/
 
 ## 🔖 更新日志
 
-各版本变更记录见 [CHANGELOG.md](CHANGELOG.md)，当前版本 v1.0.36，最后更新于 2026-10-11。
+各版本变更记录见 [CHANGELOG.md](CHANGELOG.md)，当前版本 v1.0.37，最后更新于 2026-10-13。
 
 ---
 
 ## 💬 交流群
 
 <p align="center">
-  <img src="docs/qq-group.jpg" width="260" alt="QQ 交流群">
+  <img src="docs/qq-group.png" width="260" alt="QQ 交流群">
 </p>
 
 ---
 
 ## 🙏 致谢与许可
 
-账户管理相关的接口实现参考了开源项目 [Kiro-account-manager](https://github.com/chaogei/Kiro-account-manager)（AGPL-3.0），
-本项目在其基础上重写为 Vue 技术栈，去掉了注册机、MITM 代理等模块；本地反代的接口字段对照它做了复刻，
-客户端接入与选号重试等部分为本项目重新实现。以下开源项目在协议转换、工具调用与网关设计上提供了参考：
+本项目以 AGPL-3.0 许可开源。感谢以下开源项目的先行探索，本项目在它们的基础上学习、借鉴与重新实现：
 
 - [Kiro-account-manager](https://github.com/chaogei/Kiro-account-manager)：Kiro 多账号管理器，本项目账户管理接口实现的来源（AGPL-3.0）
 - [Kiro-Go](https://github.com/Quorinex/Kiro-Go)：把 Kiro 账号转换为 OpenAI / Anthropic 兼容 API 的 Go 服务
 - [kiro.rs](https://github.com/hank9999/kiro.rs)：Rust 编写的 Anthropic Claude API 兼容代理，将请求转换为 Kiro API
 - [new-api](https://github.com/QuantumNous/new-api)：连接模型、应用与 Agent 的 AI 网关
 - [sub2api](https://github.com/touwaeriol/sub2api)：AI API 网关平台，订阅配额分发管理
-
-- 作者：[lucks-cloud](https://github.com/lucks-cloud)
-- 许可：[AGPL-3.0](LICENSE)
-- Kiro 官网：<https://kiro.dev>

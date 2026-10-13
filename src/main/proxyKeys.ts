@@ -15,11 +15,6 @@ import {
   type ProxyKeyUsageRecord
 } from '../shared/types'
 
-/** 每个 Key 保留的明细条数：够看最近一阵子，又不让 store 无限膨胀 */
-const RECENT_LIMIT = 500
-/** 每日汇总保留的天数 */
-const DAY_LIMIT = 90
-
 /** 统一的 Key 格式：sk- 前缀让各家客户端的「看起来像不像 Key」校验都能过 */
 export function generateProxyKey(): string {
   return `sk-${randomBytes(24).toString('hex')}`
@@ -69,14 +64,8 @@ export function recordKeyUsage(keyId: string, record: ProxyKeyUsageRecord): void
   add((usage.byModel[record.model] ??= emptyStats()), record)
   add((usage.byDay[dayKey(record.at)] ??= emptyStats()), record)
 
+  // 明细与每日汇总全部保留：统计弹窗可以按任意日期范围查看，清空统计时才一并清掉
   usage.recent.unshift(record)
-  if (usage.recent.length > RECENT_LIMIT) usage.recent.length = RECENT_LIMIT
-
-  // YYYY-MM-DD 的字典序就是时间序，删最旧的
-  const days = Object.keys(usage.byDay).sort()
-  for (const stale of days.slice(0, Math.max(0, days.length - DAY_LIMIT))) {
-    delete usage.byDay[stale]
-  }
 
   usage.lastUsedAt = record.at
   scheduleUsageFlush()

@@ -9,8 +9,11 @@ import { CreditCardOutlined, UnorderedListOutlined } from '@ant-design/icons-vue
 import PaymentLinkExtractPane from '@/components/accounts/PaymentLinkExtractPane.vue'
 import PaymentLinkRecordsPane from '@/components/accounts/PaymentLinkRecordsPane.vue'
 import { useAccountsStore } from '@/stores/accounts'
+import { useSettingsStore } from '@/stores/settings'
 
 const accountsStore = useAccountsStore()
+/** 顶栏控件尺寸跟随设置里的「控件尺寸」，与账户管理那一排一致 */
+const settingsStore = useSettingsStore()
 
 const tab = ref<'extract' | 'records'>('extract')
 const extracting = ref(false)
@@ -24,7 +27,7 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
 <template>
   <div class="subscriptions-page">
     <div class="page-head">
-      <a-radio-group v-model:value="tab" button-style="solid">
+      <a-radio-group v-model:value="tab" button-style="solid" :size="settingsStore.toolbarSize">
         <a-radio-button value="extract">
           <CreditCardOutlined />
           批量提取
@@ -42,6 +45,7 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
       <a-tag color="green" :bordered="false">已开通 {{ paidCount }}</a-tag>
     </div>
 
+    <!-- 内容区与其他页面一致：页面本身不加外框，各块是独立的小卡片，由面板自己排 -->
     <div class="page-body">
       <PaymentLinkExtractPane
         v-show="tab === 'extract'"
@@ -54,19 +58,23 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
 </template>
 
 <style scoped>
+/* 与账户管理 / API Key 管理同一套：整页铺满内容区，顶栏固定，内容区独立滚动 */
 .subscriptions-page {
   display: flex;
   flex-direction: column;
-  gap: 14px;
   height: 100%;
   min-height: 0;
 }
 
+/* 顶栏行与账户管理的 meta-bar 同款：左边切换，右边统计标签 */
 .page-head {
   display: flex;
   align-items: center;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 6px;
   flex: 0 0 auto;
+  margin-bottom: 12px;
+  font-size: 13px;
 }
 
 .page-head :deep(.ant-radio-button-wrapper) {
@@ -75,14 +83,14 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
   gap: 6px;
 }
 
+.page-head .ant-tag {
+  margin: 0;
+}
+
 .page-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow: auto;
-  padding: 16px;
-  border-radius: 14px;
-  background: var(--kal-card-bg);
-  border: 1px solid var(--kal-border);
 }
 
 .spacer {

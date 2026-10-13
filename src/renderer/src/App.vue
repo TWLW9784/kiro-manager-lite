@@ -5,6 +5,7 @@ import { Modal } from 'ant-design-vue'
 import zhCN from 'ant-design-vue/es/locale/zh_CN'
 import AppSidebar from '@/components/layout/AppSidebar.vue'
 import AppTitleBar from '@/components/layout/AppTitleBar.vue'
+import AppTopNav from '@/components/layout/AppTopNav.vue'
 import UpdateAvailableModal from '@/components/common/UpdateAvailableModal.vue'
 import CloseConfirmModal from '@/components/common/CloseConfirmModal.vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -113,8 +114,10 @@ watch(
     :locale="zhCN"
     :component-size="settingsStore.settings.componentSize"
   >
-    <div class="app-shell">
-      <AppSidebar />
+    <!-- 左右布局：侧栏 + 内容并排；上下布局：顶部导航栏在上、内容在下 -->
+    <div class="app-shell" :class="{ 'layout-top': settingsStore.settings.layoutMode === 'top' }">
+      <AppTopNav v-if="settingsStore.settings.layoutMode === 'top'" />
+      <AppSidebar v-else />
       <div class="app-body">
         <AppTitleBar />
         <main class="app-content">

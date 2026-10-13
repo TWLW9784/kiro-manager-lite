@@ -19,6 +19,7 @@ import {
   SyncOutlined
 } from '@ant-design/icons-vue'
 import { useAccountsStore } from '@/stores/accounts'
+import { freshAccount as ensureFreshAccount } from '@/utils/freshAccount'
 import { copyText } from '@/utils/ui'
 import { toPlain } from '@/utils/ipc'
 import { priceFields } from '@/utils/paymentLinkExtract'
@@ -29,6 +30,7 @@ const props = defineProps<{ account: Account }>()
 
 const emit = defineEmits<{ close: [] }>()
 
+/** 生成的结算链接记成支付链接标记，在「新订阅管理」里跟进 */
 const accountsStore = useAccountsStore()
 
 const loading = ref(true)
@@ -43,28 +45,9 @@ const busy = ref('')
 /** 当前套餐：接口回的原始订阅类型能直接对上档位的 subscriptionType */
 const currentType = computed(() => props.account.subscription.rawType || '')
 
-/**
- * 取一份 token 还没过期的账号副本。
- *
- * 门户的订阅接口靠 cookie 里的 AccessToken 认身份，过期就是
- * 401 UnauthorizedException: Authentication required or access denied。
- * 非 IDE 当前登录的账号缓存里那份基本都过期了（IDE 只续自己在用的那个），
- * 所以先按需续一次；refreshToken 只在该账号确实是 IDE 当前账号时才回写磁盘。
- */
-async function freshAccount(): Promise<Account> {
-  const current = accountsStore.get(props.account.id) ?? props.account
-  // 留 1 分钟余量，避免请求发出途中过期
-  if (current.credentials.accessToken && (current.credentials.expiresAt ?? 0) - Date.now() > 60_000) {
-    return current
-  }
-  refreshingToken.value = true
-  try {
-    const res = await accountsStore.refreshToken(props.account.id)
-    if (!res.ok) throw new Error(`刷新密钥失败：${res.error}`)
-    return accountsStore.get(props.account.id) ?? current
-  } finally {
-    refreshingToken.value = false
-  }
+/** 门户接口要未过期的 token，按需续期（见 utils/freshAccount） */
+function freshAccount(): Promise<Account> {
+  return ensureFreshAccount(props.account, (v) => (refreshingToken.value = v))
 }
 
 /**

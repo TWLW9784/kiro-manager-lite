@@ -174,7 +174,7 @@ export interface Api {
   openAccountPortal: (account: Account) => Promise<IpcResult<{ url: string }>>
   /** 查订阅入口：已订阅返回 Stripe 账单管理链接，未订阅返回可开通档位 */
   getSubscriptionEntry: (account: Account) => Promise<IpcResult<SubscriptionEntry>>
-  /** 为指定档位生成 Stripe 结算链接 */
+  /** 为指定档位生成 Stripe 结算链接；已订阅账号返回 kind=manage（账单管理链接） */
   createSubscriptionCheckout: (
     account: Account,
     subscriptionType: string,
