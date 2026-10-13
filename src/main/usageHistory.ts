@@ -75,6 +75,23 @@ export function getUsageHistory(accountId: string): UsageHistoryEntry[] {
  * 只有积分或额度真的变了才落一条，否则每分钟一次的自动刷新会把日志灌满。
  * 返回是否写入了新记录。
  */
+/**
+ * 每个账号历史上出现过的最高额度上限。
+ *
+ * 用来认出「曾经订阅过、现在掉回 Free」的账号：Free 额度是 50，历史上限超过它说明付费过。
+ * 这类账号的 $20 新用户余额已经用掉，批量提取支付链接时要跳过。
+ * 实测 2026-10：33 个此类账号（Google / GitHub 登录）全部是导入时为 Pro+、之后到期掉回 Free 的。
+ */
+export function getMaxUsageLimits(): Record<string, number> {
+  const result: Record<string, number> = {}
+  for (const [id, entries] of Object.entries(history())) {
+    let max = 0
+    for (const entry of entries) if (entry.limit > max) max = entry.limit
+    if (max > 0) result[id] = max
+  }
+  return result
+}
+
 export function appendUsagePoint(accountId: string, usage: AccountUsage): boolean {
   if (!accountId || !usage) return false
 

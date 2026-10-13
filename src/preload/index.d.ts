@@ -185,6 +185,8 @@ export interface Api {
   logoutKiro: () => Promise<IpcResult<{ deleted: number }>>
 
   getUsageHistory: (accountId: string) => Promise<IpcResult<UsageHistoryEntry[]>>
+  /** 每个账号历史上出现过的最高额度上限（认「曾订阅过、现在 Free」的账号用） */
+  getMaxUsageLimits: () => Promise<IpcResult<Record<string, number>>>
   recordUsagePoint: (
     accountId: string,
     usage: AccountUsage

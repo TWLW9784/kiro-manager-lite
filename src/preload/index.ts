@@ -103,6 +103,7 @@ const api = {
 
   // 积分变化日志
   getUsageHistory: (accountId: string) => invoke('usage:history', accountId),
+  getMaxUsageLimits: () => invoke('usage:max-limits'),
   recordUsagePoint: (accountId: string, usage: unknown) =>
     invoke('usage:record', accountId, usage),
   clearUsageHistory: (accountId: string) => invoke('usage:clear-history', accountId),

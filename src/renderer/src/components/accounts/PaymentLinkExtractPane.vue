@@ -208,7 +208,10 @@ function writeStorage(key: string, value: string): void {
 
 watch(planType, (value) => value && writeStorage(PLAN_STORAGE_KEY, value))
 
-onMounted(() => void loadPlans())
+onMounted(() => {
+  void loadPlans()
+  void loadMaxLimits()
+})
 
 // ============ 优惠条件 ============
 
@@ -232,6 +235,28 @@ const skipExtracted = ref(true)
 const reExtractExpired = ref(true)
 const skipNoDiscount = ref(true)
 const skipAbnormal = ref(true)
+/**
+ * 跳过曾经订阅过的：现在是 Free、但额度历史上出现过 > 50（付费档）的账号。
+ * 它们是订阅到期掉回 Free 的老号，$20 新用户余额已经用掉，提出来的链接都是原价。
+ */
+const skipLapsed = ref(true)
+/** 免费档的额度上限；历史上限超过它说明付费过 */
+const FREE_LIMIT = 50
+/** 各账号历史最高额度上限，进页面时从主进程取一次 */
+const maxLimits = ref<Record<string, number>>({})
+
+function isLapsed(account: Account): boolean {
+  return (maxLimits.value[account.id] ?? account.usage.limit ?? 0) > FREE_LIMIT
+}
+
+async function loadMaxLimits(): Promise<void> {
+  try {
+    const res = await window.api.getMaxUsageLimits()
+    if (res.success && res.data) maxLimits.value = res.data
+  } catch {
+    /* 取不到就只按当前额度判断 */
+  }
+}
 /** 提取数量；null 表示「全部候选」 */
 const quantity = ref<number | null>(null)
 
@@ -267,6 +292,7 @@ const breakdown = computed(() => {
   let expired = 0
   let noDiscount = 0
   let abnormal = 0
+  let lapsed = 0
   const nowMs = now.value
   const candidates: Account[] = []
   for (const account of scopeAccounts.value) {
@@ -275,16 +301,19 @@ const breakdown = computed(() => {
     const isExpired = state === 'expired'
     const isNoDiscount = !!account.discountCheck
     const isAbnormal = shouldSkipAccountUsageRefresh(account)
+    const isLapsedAccount = isLapsed(account)
     if (isExtracted) extracted++
     if (isExpired) expired++
     if (isNoDiscount) noDiscount++
     if (isAbnormal) abnormal++
+    if (isLapsedAccount) lapsed++
     if (skipExtracted.value && isExtracted && !(reExtractExpired.value && isExpired)) continue
     if (skipNoDiscount.value && isNoDiscount) continue
     if (skipAbnormal.value && isAbnormal) continue
+    if (skipLapsed.value && isLapsedAccount) continue
     candidates.push(account)
   }
-  return { extracted, expired, noDiscount, abnormal, candidates }
+  return { extracted, expired, noDiscount, abnormal, lapsed, candidates }
 })
 
 const takeCount = computed(() => {
@@ -607,6 +636,11 @@ function tierOf(row: Row): string {
           <a-checkbox v-model:checked="skipAbnormal">
             跳过封禁 / 凭证失效的<span class="muted">（{{ breakdown.abnormal }}）</span>
           </a-checkbox>
+          <a-tooltip title="现在是 Free、但额度历史上出现过付费档（> 50）的账号：订阅到期掉回 Free 的老号，$20 新用户余额已经用掉，只能原价开通">
+            <a-checkbox v-model:checked="skipLapsed">
+              跳过曾经订阅过的<span class="muted">（{{ breakdown.lapsed }}）</span>
+            </a-checkbox>
+          </a-tooltip>
             <a-button
               v-if="breakdown.noDiscount"
               type="link"

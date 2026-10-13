@@ -107,7 +107,26 @@ async function load(): Promise<void> {
   }
 }
 
-onMounted(load)
+/**
+ * 这个号以前订阅过吗：现在 Free、但额度历史上限超过免费档的 50。
+ * 这类号的 $20 新用户余额已经用掉，从这里开出来的链接是原价，提示一下免得误付。
+ */
+const lapsed = ref(false)
+
+async function checkLapsed(): Promise<void> {
+  if (props.account.subscription.type !== 'Free') return
+  try {
+    const res = await window.api.getMaxUsageLimits()
+    lapsed.value = (res.data?.[props.account.id] ?? 0) > 50
+  } catch {
+    /* 判断不了就不提示 */
+  }
+}
+
+onMounted(() => {
+  void load()
+  void checkLapsed()
+})
 
 function priceText(plan: SubscriptionPlan): string {
   if (plan.amount <= 0) return '免费'
@@ -200,6 +219,13 @@ async function copyCheckout(plan: SubscriptionPlan): Promise<void> {
       </div>
 
       <template v-else>
+        <a-alert
+          v-if="lapsed"
+          type="warning"
+          show-icon
+          style="margin-bottom: 12px"
+          message="这个账号以前订阅过（额度历史上出现过付费档），$20 新用户余额已经用掉，从这里开通是原价，没有新号优惠。"
+        />
         <p class="tip muted">
           账号 {{ props.account.email }} 当前没有可管理的订阅，可直接开通下列档位。
           支付由 Stripe 承载，链接每次点击时现生成。

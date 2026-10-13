@@ -158,6 +158,7 @@ import {
 import {
   appendUsagePoint,
   clearUsageHistory,
+  getMaxUsageLimits,
   getUsageHistory,
   pruneUsageHistory
 } from './usageHistory'
@@ -250,6 +251,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
 
   // ============ 积分变化日志 ============
   handle('usage:history', (_e, accountId: string) => ok(getUsageHistory(accountId)))
+
+  handle('usage:max-limits', () => ok(getMaxUsageLimits()))
 
   handle('usage:record', (_e, accountId: string, usage: AccountUsage) =>
     ok({ recorded: appendUsagePoint(accountId, usage) })

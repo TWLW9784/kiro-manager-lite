@@ -231,6 +231,15 @@ export async function extractPaymentLink(
     })
     return { state: 'ok', url, priceText }
   } catch (e) {
-    return { state: 'fail', error: errorMessage(e) }
+    const message = errorMessage(e)
+    /*
+     * 实测（2026-10）：Google / GitHub 登录、当前 Free 的账号调订阅接口一律 401，
+     * 刷新 token 也一样；同类型已订阅的账号却正常。这批号恰好全是订阅过又到期的老号，
+     * 没有新用户优惠，算跳过而不是失败，免得被当成临时故障反复重试。
+     */
+    if (/401/.test(message) && /Unauthorized/i.test(message)) {
+      return { state: 'skip', error: 'Kiro 网页端拒绝该账号生成订阅链接（社交登录的老号常见）' }
+    }
+    return { state: 'fail', error: message }
   }
 }
