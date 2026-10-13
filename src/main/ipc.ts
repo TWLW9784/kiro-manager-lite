@@ -19,6 +19,7 @@ import {
   getSubscriptionPlans
 } from './kiroSubscription'
 import { checkCheckoutStatus } from './stripeCheckout'
+import { startClipboardWatch, stopClipboardWatch } from './clipboardWatch'
 import { clearKiroSsoCache, readKiroAuthToken, readLocalKiroCredentials, ssoCacheFile } from './kiroAuth'
 import { restartKiroIde } from './kiroProcess'
 import { chatTraceOf, listKiroModels, streamApiKeyChat, streamKiroChat } from './kiroChat'
@@ -600,6 +601,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     await writeFile(result.filePath, buildZip(entries))
     revealExported(result.filePath)
     return ok({ saved: true, path: result.filePath, count: entries.length })
+  })
+
+  // 剪贴板监听：「粘贴文本导入」里连续收集聊天记录里的 JSON
+  handle('clipboard:watch-start', (event) => {
+    startClipboardWatch(event.sender)
+    return ok()
+  })
+  handle('clipboard:watch-stop', () => {
+    stopClipboardWatch()
+    return ok()
   })
 
   // xlsx 是二进制 zip，走不了上面的 utf-8 通道；渲染层只传结构化数据，落盘前在主进程组装

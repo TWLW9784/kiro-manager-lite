@@ -241,6 +241,10 @@ export interface Api {
     filename: string
   ) => Promise<IpcResult<{ saved: boolean; path?: string; count?: number }>>
   writeClipboard: (text: string) => void
+  /** 剪贴板监听：开始后每次复制新内容都会通过 onClipboardChanged 推过来 */
+  startClipboardWatch: () => Promise<IpcResult>
+  stopClipboardWatch: () => Promise<IpcResult>
+  onClipboardChanged: (handler: (text: string) => void) => () => void
 
   getSettings: () => Promise<IpcResult<AppSettings>>
   saveSettings: (patch: Partial<AppSettings>) => Promise<IpcResult<AppSettings>>

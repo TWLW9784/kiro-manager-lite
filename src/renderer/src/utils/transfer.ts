@@ -193,7 +193,69 @@ function parseJsonEntry(raw: Record<string, unknown>): AccountImportItem {
   }
 }
 
-/** 统一解析导入内容：完整 JSON / 精简 JSON 数组 / 卡密 / CSV / TXT */
+/**
+ * 从任意文本里抠出所有顶层 JSON 值（对象 / 数组）。
+ *
+ * 聊天软件里一条消息一个 JSON，复制多条拼在一起就是 `{...}\n{...}`，
+ * 中间还可能夹着昵称、时间这类杂字；整段 JSON.parse 必然失败。
+ * 这里按括号配对逐段切出来（跳过字符串里的括号与转义），能解析的才要。
+ */
+export function extractJsonValues(text: string): unknown[] {
+  const values: unknown[] = []
+  let start = -1
+  let depth = 0
+  let inString = false
+  let escaped = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (inString) {
+      if (escaped) escaped = false
+      else if (ch === '\\') escaped = true
+      else if (ch === '"') inString = false
+      continue
+    }
+    if (ch === '"') {
+      if (depth > 0) inString = true
+      continue
+    }
+    if (ch === '{' || ch === '[') {
+      if (depth === 0) start = i
+      depth++
+    } else if ((ch === '}' || ch === ']') && depth > 0) {
+      depth--
+      if (depth === 0 && start >= 0) {
+        try {
+          values.push(JSON.parse(text.slice(start, i + 1)))
+        } catch {
+          /* 不完整或不是 JSON 的片段（比如正文里的方括号），跳过 */
+        }
+        start = -1
+      }
+    }
+  }
+  return values
+}
+
+/** 同一个 refreshToken 只留第一条：同一条消息复制两遍、或几家导出重叠时不重复校验 */
+function uniqueByToken(items: AccountImportItem[]): AccountImportItem[] {
+  const seen = new Set<string>()
+  return items.filter((item) => {
+    if (!item.refreshToken || seen.has(item.refreshToken)) return false
+    seen.add(item.refreshToken)
+    return true
+  })
+}
+
+function jsonItems(values: unknown[]): AccountImportItem[] {
+  return uniqueByToken(
+    values
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .filter((value): value is Record<string, unknown> => !!value && typeof value === 'object')
+      .map(parseJsonEntry)
+  )
+}
+
+/** 统一解析导入内容：完整 JSON / 精简 JSON 数组 / 多段 JSON / 卡密 / CSV / TXT */
 export function parseImportContent(raw: string): ParsedImport {
   const text = raw.trim()
   if (!text) return { items: [] }
@@ -207,12 +269,17 @@ export function parseImportContent(raw: string): ParsedImport {
     }
 
     // 精简 JSON 数组 / 单对象
-    const list = Array.isArray(parsed) ? parsed : [parsed]
-    const items = list.map(parseJsonEntry).filter((item) => !!item.refreshToken)
-    return { items }
+    return { items: jsonItems([parsed]) }
   } catch {
+    // 多段 JSON 拼在一起（聊天记录里一条消息一个）：逐段抠出来
+    const fromJson = jsonItems(extractJsonValues(text))
+    if (fromJson.length) return { items: fromJson }
     // 非 JSON：CSV / 卡密 / TXT
-    return { items: text.includes(',') && !text.includes('----') ? parseCsv(text) : parseKamiLines(text) }
+    return {
+      items: uniqueByToken(
+        text.includes(',') && !text.includes('----') ? parseCsv(text) : parseKamiLines(text)
+      )
+    }
   }
 }
 

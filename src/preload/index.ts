@@ -149,6 +149,10 @@ const api = {
   exportToZip: (bundle: unknown, filename: string) =>
     invoke('file:export-zip', bundle, filename),
   writeClipboard: (text: string) => clipboard.writeText(text),
+  /** 剪贴板监听：开始后每次复制新内容都会推过来，用完记得 stop */
+  startClipboardWatch: () => invoke('clipboard:watch-start'),
+  stopClipboardWatch: () => invoke('clipboard:watch-stop'),
+  onClipboardChanged: (handler: (text: string) => void) => subscribe('clipboard:changed', handler),
 
   // 设置 / 应用
   getSettings: () => invoke('settings:get'),
