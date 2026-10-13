@@ -49,6 +49,7 @@ const expiredCount = computed(() => accountsStore.stats.byPaymentState.expired)
     <div class="page-body">
       <PaymentLinkExtractPane
         v-show="tab === 'extract'"
+        :active="tab === 'extract'"
         @running="(value) => (extracting = value)"
         @show-records="tab = 'records'"
       />

@@ -10,7 +10,7 @@
  *   于是提一批、付一批，再点一次就接着往后提；
  * - 低并发 + 错峰：一次提取要开一次门户首页、调一次 CBOR、再问一次 Stripe，批量并发容易被判异常。
  */
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, toRef, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   CheckCircleFilled,
@@ -30,6 +30,7 @@ import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
 import { formatLocal, formatPrice, formatUsd, runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
+import { useThrottledAccounts } from '@/utils/accountsSnapshot'
 import { auditExport } from '@/utils/audit'
 import { toPlain } from '@/utils/ipc'
 import { now } from '@/utils/now'
@@ -56,12 +57,20 @@ import { paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
 import { shouldSkipAccountUsageRefresh } from '@shared/refreshPolicy'
 import type { Account, SubscriptionPlan } from '@shared/types'
 
+/** active：当前是否切到这个面板；不在前台时候选统计不跟着后台刷新重算 */
+const props = defineProps<{ active?: boolean }>()
 const emit = defineEmits<{ running: [boolean]; 'show-records': [] }>()
 
 const accountsStore = useAccountsStore()
 const settingsStore = useSettingsStore()
 
 const privacy = computed(() => settingsStore.settings.privacyMode)
+
+/**
+ * 候选统计用节流快照：后台刷新用量时 store 每刷完一个号就整体换一次数组，
+ * 直接依赖会让上千个 Free 号的筛选、排序、估价每秒重算几十次。提取中保持实时，免得进度显示滞后。
+ */
+const accountsSnapshot = useThrottledAccounts(toRef(() => !!props.active))
 
 // ============ 档位 ============
 
@@ -277,7 +286,7 @@ const groupOptions = computed(() => [
 /** 范围：当前档位是 Free 的账号，按分组收窄，按导入时间排序 */
 const scopeAccounts = computed(() => {
   const groupSet = groupIds.value.length ? new Set(groupIds.value) : null
-  const list = accountsStore.accounts.filter((a) => {
+  const list = accountsSnapshot.value.filter((a) => {
     if (a.subscription.type !== 'Free') return false
     if (!groupSet) return true
     const gid = a.groupId && accountsStore.groupMap.has(a.groupId) ? a.groupId : UNGROUPED

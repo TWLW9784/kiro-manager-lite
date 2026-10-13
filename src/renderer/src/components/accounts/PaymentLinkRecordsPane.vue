@@ -9,7 +9,7 @@
  *
  * 操作范围与导出弹窗同一个规则：有勾选作用于勾选项，没勾选作用于当前筛选结果。
  */
-import { computed, h, ref, watch } from 'vue'
+import { computed, h, ref, toRef, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import {
   ClearOutlined,
@@ -36,6 +36,7 @@ import {
   subscriptionMeta
 } from '@/utils/format'
 import { auditExport } from '@/utils/audit'
+import { useThrottledAccounts } from '@/utils/accountsSnapshot'
 import { toPlain } from '@/utils/ipc'
 import { now } from '@/utils/now'
 import { confirmDanger, copyText } from '@/utils/ui'
@@ -75,9 +76,15 @@ const stateFilter = ref<StateFilter>('all')
 const keyword = ref('')
 const selectedKeys = ref<string[]>([])
 
+/**
+ * 账号数据走节流快照：后台批量刷新用量时 store 每刷完一个号就整体换一次数组，
+ * 直接依赖会让这张表每秒重算、重渲染几十次，滚动发卡。不在前台时不更新。
+ */
+const accountsSnapshot = useThrottledAccounts(toRef(() => !!props.active))
+
 /** 带标记的账号，按提取时间倒序：最新提的在最上面 */
 const marked = computed(() =>
-  accountsStore.accounts
+  accountsSnapshot.value
     .filter((a) => a.paymentLink)
     .sort((a, b) => b.paymentLink!.createdAt - a.paymentLink!.createdAt)
 )
@@ -146,6 +153,18 @@ function stateMeta(account: Account): { text: string; color: string; tip?: strin
   }
   return { ...PAYMENT_LINK_META[state], tip: state === 'pending' ? checked : undefined }
 }
+
+/**
+ * 每行的状态标签预先算好：模板里一行要用好几次，直接在模板里调函数，
+ * 每次重渲染每行都要重算几遍。
+ */
+const rowMeta = computed(() => {
+  const map = new Map<string, ReturnType<typeof stateMeta> & { state: PaymentLinkState }>()
+  for (const account of visible.value) {
+    map.set(account.id, { ...stateMeta(account), state: paymentLinkState(account, now.value) })
+  }
+  return map
+})
 
 /** 状态更新时间早于提取时间：Kiro 订阅档位还没在提取之后核对过 */
 function uncheckedSinceExtract(account: Account): boolean {
@@ -560,8 +579,8 @@ function clearOne(account: Account): void {
           </div>
         </template>
         <template v-else-if="column.key === 'state'">
-          <a-tooltip :title="stateMeta(record).tip">
-            <a-tag :color="stateMeta(record).color" :bordered="false">{{ stateMeta(record).text }}</a-tag>
+          <a-tooltip :title="rowMeta.get(record.id)?.tip">
+            <a-tag :color="rowMeta.get(record.id)?.color" :bordered="false">{{ rowMeta.get(record.id)?.text }}</a-tag>
           </a-tooltip>
         </template>
         <template v-else-if="column.key === 'current'">
@@ -581,7 +600,7 @@ function clearOne(account: Account): void {
         </template>
         <template v-else-if="column.key === 'actions'">
           <a-space :size="0">
-            <a-tooltip v-if="['pending', 'expired'].includes(paymentLinkState(record, now))" title="重新提取：生成一条新链接">
+            <a-tooltip v-if="['pending', 'expired'].includes(rowMeta.get(record.id)?.state ?? '')" title="重新提取：生成一条新链接">
               <a-button type="text" size="small" :disabled="reExtracting" @click="reExtractOne(record)">
                 <template #icon><RedoOutlined /></template>
               </a-button>
