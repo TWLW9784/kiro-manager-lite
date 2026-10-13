@@ -41,12 +41,14 @@ import {
 } from '@/utils/paymentLinks'
 import {
   discountRuleText,
+  estimateFirstPayment,
   extractPaymentLink,
   readDiscountSetting,
   readRate,
   writeDiscountSetting,
   type DiscountRule,
-  type DiscountSetting
+  type DiscountSetting,
+  type StoredRate
 } from '@/utils/paymentLinkExtract'
 import { errorMessage } from '@shared/errors'
 import { paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
@@ -80,53 +82,59 @@ const planType = ref('')
 const paidPlans = computed(() => plans.value.filter((plan) => plan.amount > 0))
 const plan = computed(() => paidPlans.value.find((p) => p.subscriptionType === planType.value))
 
-/** 新用户余额，从首期里抵扣 */
-const NEW_USER_CREDIT = 20
+/** USD → CNY 汇率；提取时遇到人民币结算页会更新它 */
+const rate = ref<StoredRate>(readRate())
 
 interface PlanPrice {
-  /** 优惠后实付（USD）：有实测用最近一次实测，没有就按整月估 */
-  due: number
-  /** 对应人民币；没提取过不知道汇率时为空 */
-  local?: string
-  /** true 表示来自最近一次实际提取，false 表示按整月 − $20 估算 */
-  measured: boolean
+  /** 本批候选里今天应付的最低 / 最高（USD） */
+  min: number
+  max: number
+  minLocal?: string
+  maxLocal?: string
+  /** 参与估算的账号数（不知道重置日的不算） */
+  count: number
 }
 
 /**
- * 档位卡片上的优惠后价格。
- *
- * 实付 = 首期（按到重置日剩余天数折算）− $20，每个账号剩余天数不同，提取前没法精确知道。
- * 有这一档最近提取过的链接就用它的实测值；否则按整月标价 − $20 给个上限估算。
+ * 档位卡片上的优惠后价格：按本批候选账号各自的重置日估算，给出区间。
+ * 首期 = 月费 × 剩余天数比例 − $20（见 estimateFirstPayment，已对照实测验证）。
+ * 剩余天数越多付得越多，所以同一档位不同账号的价格不一样，区间比单个数字更准确。
  */
 const planPrices = computed(() => {
-  const rate = readRate()
-  const latest = new Map<string, NonNullable<Account['paymentLink']>>()
-  for (const account of accountsStore.accounts) {
-    const link = account.paymentLink
-    if (!link || link.amountDue === undefined) continue
-    const prev = latest.get(link.subscriptionType)
-    if (!prev || link.createdAt > prev.createdAt) latest.set(link.subscriptionType, link)
-  }
+  const nowMs = now.value
+  const resets = breakdown.value.candidates
+    .slice(0, takeCount.value || undefined)
+    .map((a) => a.subscription.expiresAt)
+    .filter((t): t is number => !!t && t > nowMs)
+  const local = (usd: number): string => formatLocal(usd * rate.value.rate, 'CNY')
   const result = new Map<string, PlanPrice>()
   for (const item of paidPlans.value) {
-    const link = latest.get(item.subscriptionType)
-    if (link) {
-      const local =
-        link.localDue !== undefined && link.localCurrency && link.localCurrency !== 'USD'
-          ? formatLocal(link.localDue, link.localCurrency)
-          : undefined
-      result.set(item.subscriptionType, { due: link.amountDue!, local, measured: true })
-      continue
-    }
-    const due = Math.max(0, item.amount - NEW_USER_CREDIT)
+    const dues = resets
+      .map((reset) => estimateFirstPayment(item.amount, reset, nowMs)?.due)
+      .filter((d): d is number => d !== undefined)
+    if (!dues.length) continue
+    const min = Math.min(...dues)
+    const max = Math.max(...dues)
     result.set(item.subscriptionType, {
-      due,
-      local: rate ? formatLocal(due * rate.rate, rate.currency) : undefined,
-      measured: false
+      min,
+      max,
+      minLocal: local(min),
+      maxLocal: local(max),
+      count: dues.length
     })
   }
   return result
 })
+
+function priceRange(p: PlanPrice): string {
+  return p.max - p.min < 0.01 ? formatUsd(p.min) : `${formatUsd(p.min)} ~ ${formatUsd(p.max)}`
+}
+
+function localRange(p: PlanPrice): string {
+  if (!p.minLocal || !p.maxLocal) return ''
+  return p.max - p.min < 0.01 ? p.minLocal : `${p.minLocal} ~ ${p.maxLocal}`
+}
+
 
 function hasValidToken(a: Account): boolean {
   return !!a.credentials.accessToken && (a.credentials.expiresAt ?? 0) - Date.now() > 60_000
@@ -384,6 +392,8 @@ async function run(list: Row[]): Promise<void> {
     )
   } finally {
     running.value = false
+    // 提取时读到的汇率已写进本地，档位卡片的人民币估算跟着更新
+    rate.value = readRate()
   }
   // 只报这一轮的增量：重试 / 继续时之前成功的不重复计数
   const ok = stat.value.ok - before.ok
@@ -515,22 +525,23 @@ function tierOf(row: Row): string {
             <span class="plan-name">{{ item.title }}</span>
             <template v-if="planPrices.get(item.subscriptionType)">
               <span class="plan-due">
-                <strong>{{ formatUsd(planPrices.get(item.subscriptionType)!.due) }}</strong>
-                <span v-if="planPrices.get(item.subscriptionType)!.local" class="plan-local">
-                  ≈ {{ planPrices.get(item.subscriptionType)!.local }}
-                </span>
+                <strong>{{ priceRange(planPrices.get(item.subscriptionType)!) }}</strong>
+              </span>
+              <span v-if="localRange(planPrices.get(item.subscriptionType)!)" class="plan-local">
+                ≈ {{ localRange(planPrices.get(item.subscriptionType)!) }}
               </span>
               <span class="plan-meta muted">
-                <s>{{ formatPrice(item.amount, item.currency) }}/月</s>
-                ·
-                {{ planPrices.get(item.subscriptionType)!.measured ? '最近实付' : '预估首付' }}
+                今天应付 · 原价 <s>{{ formatPrice(item.amount, item.currency) }}/月</s>
               </span>
             </template>
+            <span v-else class="plan-meta muted">
+              原价 {{ formatPrice(item.amount, item.currency) }}/月 · 候选账号没有重置日，无法估算
+            </span>
           </button>
         </div>
         <div class="hint muted">
-          优惠后价格 = 首期（按到重置日的剩余天数折算）− $20 新用户余额。
-          「最近实付」取这一档最近一次提取的实测值；没提取过的按整月 − $20 预估，实际一般更低。
+          今天应付 = 月费 × 到重置日的剩余天数比例 − $20 新用户余额，按本批候选账号各自的重置日估算，
+          提取时以 Stripe 实际金额为准。之后每月按原价续费。
         </div>
       </div>
 

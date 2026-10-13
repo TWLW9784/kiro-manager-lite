@@ -61,7 +61,13 @@ export function rejectReason(price: CheckoutPrice | undefined, setting: Discount
 
 export function priceLabel(price: CheckoutPrice): string {
   const credit = price.credit > 0 ? ` − 抵扣 ${formatUsd(price.credit)}` : ''
-  const local = price.presentmentCurrency !== 'USD' ? ` ≈ ${formatLocal(price.presentmentDue, price.presentmentCurrency)}` : ''
+  // 结算页展示币种随出口 IP 变（CNY / USD / UZS…），这里统一折成人民币
+  const cny = linkCny({
+    amountDue: price.amountDue,
+    localDue: price.presentmentDue,
+    localCurrency: price.presentmentCurrency
+  })
+  const local = cny !== undefined ? ` ≈ ${formatLocal(cny, 'CNY')}` : ''
   return `今付 ${formatUsd(price.amountDue)}${local}（首期 ${formatUsd(price.subtotal)}${credit}）`
 }
 
@@ -79,23 +85,64 @@ export function priceFields(price: CheckoutPrice | undefined): Partial<AccountPa
   }
 }
 
+// ============ 首期估算 ============
+
+/** 新用户余额，从首期里抵扣 */
+export const NEW_USER_CREDIT = 20
+
+/** 同一时刻往前推一个自然月（Stripe 按月计费的上一个周期起点） */
+function previousMonth(ms: number): number {
+  const d = new Date(ms)
+  const day = d.getUTCDate()
+  d.setUTCDate(1)
+  d.setUTCMonth(d.getUTCMonth() - 1)
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate()
+  d.setUTCDate(Math.min(day, last))
+  return d.getTime()
+}
+
+/**
+ * 估算某账号开通某档位时的首期与今天应付（USD）。
+ *
+ * Stripe 以账号的重置日为计费锚点，首期 = 月费 × 剩余时长 / 本周期总时长，再扣 $20 新用户余额。
+ * 实测（重置日 11-01、10-12 16:50 UTC 提取，剩 19.3/31 天 ≈ 0.623）：
+ * Pro 12.46、Pro+ 24.93、Pro Max 62.32、Power 124.64，四档比例一致，按此公式误差在 1 美分内。
+ * 不知道重置日时返回 undefined，界面不硬估。
+ */
+export function estimateFirstPayment(
+  amount: number,
+  resetAt: number | undefined,
+  nowMs = Date.now()
+): { subtotal: number; due: number } | undefined {
+  if (!resetAt || resetAt <= nowMs) return undefined
+  const start = previousMonth(resetAt)
+  const ratio = Math.min(1, (resetAt - nowMs) / (resetAt - start))
+  const subtotal = Math.round(amount * ratio * 100) / 100
+  return { subtotal, due: Math.max(0, Math.round((subtotal - NEW_USER_CREDIT) * 100) / 100) }
+}
+
 // ============ 汇率 ============
 
 /**
- * 最近一次从 Stripe 结算页拿到的汇率（1 USD = rate 展示币种）。
- * 只有提取过才知道 Stripe 给国内 IP 用的是哪个币种、多少汇率；
- * 记在本地，档位卡片上「≈ ¥xx」的估算就用它，提取一次更新一次。
+ * 美元 → 人民币的汇率（1 USD = rate CNY），界面上所有「≈ ¥」都用它。
+ *
+ * Stripe 按请求出口 IP 决定展示币种：同一批链接，走国内 IP 是 CNY，走代理可能是 USD、UZS……
+ * 所以不能直接显示结算页的本地金额。只在结算页恰好是 CNY 时记下它的汇率（含 Stripe 的换汇加价），
+ * 其余情况用记下的值；一次都没见过时用实测过的 6.96 兜底。
  */
-const RATE_STORAGE_KEY = 'kal.paymentLink.rate'
+const RATE_STORAGE_KEY = 'kal.paymentLink.cnyRate'
+/** 2026-10 实测 Stripe Adaptive Pricing 的 USD→CNY 汇率 */
+const FALLBACK_CNY_RATE = 6.96
 
 export interface StoredRate {
-  currency: string
+  currency: 'CNY'
   rate: number
+  /** 记下的时间；0 表示还没见过，用的是兜底值 */
   at: number
 }
 
 function rememberRate(currency: string, rate: number): void {
-  if (currency === 'USD' || !(rate > 0)) return
+  if (currency !== 'CNY' || !(rate > 0)) return
   try {
     localStorage.setItem(RATE_STORAGE_KEY, JSON.stringify({ currency, rate, at: Date.now() }))
   } catch {
@@ -103,13 +150,21 @@ function rememberRate(currency: string, rate: number): void {
   }
 }
 
-export function readRate(): StoredRate | null {
+export function readRate(): StoredRate {
   try {
     const saved = JSON.parse(localStorage.getItem(RATE_STORAGE_KEY) || 'null') as StoredRate | null
-    return saved && saved.rate > 0 && saved.currency ? saved : null
+    if (saved && saved.currency === 'CNY' && saved.rate > 0) return saved
   } catch {
-    return null
+    /* 读不到用兜底 */
   }
+  return { currency: 'CNY', rate: FALLBACK_CNY_RATE, at: 0 }
+}
+
+/** 某条链接今天应付的人民币：结算页本来就是 CNY 用它的原值，否则按汇率从美元换算 */
+export function linkCny(link: Pick<AccountPaymentLink, 'amountDue' | 'localDue' | 'localCurrency'>): number | undefined {
+  if (link.localCurrency === 'CNY' && link.localDue !== undefined) return link.localDue
+  if (link.amountDue === undefined) return undefined
+  return Math.round(link.amountDue * readRate().rate * 100) / 100
 }
 
 /** 下单所需的档位信息；重新提取时由已存的链接还原，不必再查一次档位列表 */

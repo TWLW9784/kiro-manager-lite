@@ -6,6 +6,7 @@ import { isAwaitingKiroSync, paymentLinkState, paymentLinkTier } from '@shared/p
 import type { Account, AccountGroup, XlsxSheet } from '@shared/types'
 import { PAYMENT_LINK_META, formatLocal, formatPrice, formatUsd, subscriptionLabel } from './format'
 import { exportStamp } from './transfer'
+import { linkCny } from './paymentLinkExtract'
 
 /** 付款状态文案：Stripe 已付、Kiro 还没同步的单独标出来 */
 export function paymentStateText(account: Account, nowMs = Date.now()): string {
@@ -19,10 +20,10 @@ export function amountDueText(link: NonNullable<Account['paymentLink']>): string
   return `今付 ${formatUsd(link.amountDue)}`
 }
 
-/** 结算页上的本地币种实付（如 ¥34.31）；老链接没存、或本来就按美元收的返回空串 */
+/** 今天应付对应的人民币（如 ¥34.31）；没有金额时返回空串 */
 export function localDueText(link: NonNullable<Account['paymentLink']>): string {
-  if (link.localDue === undefined || !link.localCurrency || link.localCurrency === 'USD') return ''
-  return formatLocal(link.localDue, link.localCurrency)
+  const cny = linkCny(link)
+  return cny === undefined ? '' : formatLocal(cny, 'CNY')
 }
 
 /**
@@ -42,7 +43,7 @@ export function buildPaymentLinkSheet(accounts: Account[], groups: AccountGroup[
         paymentLinkTier(link),
         link.url,
         link.amountDue ?? null,
-        link.localCurrency === 'CNY' ? link.localDue ?? null : null,
+        linkCny(link) ?? null,
         link.credit ?? null,
         link.subtotal ?? null,
         link.amount,
@@ -125,9 +126,10 @@ export function buildPaymentLinkTxt(accounts: Account[], options: PaymentLinkTxt
     const tiers = [...new Set(list.map((a) => paymentLinkTier(a.paymentLink!)))]
     const due = list.reduce((sum, a) => sum + (a.paymentLink!.amountDue ?? 0), 0)
     const unknown = list.filter((a) => a.paymentLink!.amountDue === undefined).length
-    // 人民币只在每条都有本地金额时才合计，缺一条就不写，免得给出一个偏低的数
-    const cny = list.every((a) => a.paymentLink!.localCurrency === 'CNY' && a.paymentLink!.localDue !== undefined)
-      ? list.reduce((sum, a) => sum + a.paymentLink!.localDue!, 0)
+    // 人民币只在每条都有金额时才合计，缺一条就不写，免得给出一个偏低的数
+    const cnys = list.map((a) => linkCny(a.paymentLink!))
+    const cny = cnys.every((v) => v !== undefined)
+      ? cnys.reduce((sum: number, v) => sum + v!, 0)
       : undefined
     header.push(
       `# 档位：${tiers.join(' / ') || '-'}　合计应付：${formatUsd(due)}${
