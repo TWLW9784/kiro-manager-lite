@@ -19,10 +19,12 @@ import {
   CreditCardOutlined,
   ExportOutlined,
   FileExcelOutlined,
+  FileTextOutlined,
   MinusCircleFilled,
   StopOutlined,
   SyncOutlined
 } from '@ant-design/icons-vue'
+import PaymentLinkTxtModal from '@/components/accounts/PaymentLinkTxtModal.vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
@@ -394,6 +396,8 @@ function copyAll(format: 'full' | 'url'): void {
 }
 
 const exporting = ref(false)
+/** 代付 TXT 弹窗：导出本批刚提取出来的那些 */
+const txtOpen = ref(false)
 
 async function exportXlsx(): Promise<void> {
   const list = extractedAccounts.value
@@ -679,14 +683,24 @@ function tierOf(row: Row): string {
             </a-menu>
           </template>
         </a-dropdown>
-        <a-button
-          :disabled="!extractedAccounts.length || running"
-          :loading="exporting"
-          @click="exportXlsx"
-        >
-          <template #icon><FileExcelOutlined /></template>
-          导出 Excel
-        </a-button>
+        <a-dropdown :disabled="!extractedAccounts.length || running">
+          <a-button :disabled="!extractedAccounts.length || running" :loading="exporting">
+            <template #icon><FileExcelOutlined /></template>
+            导出（{{ extractedAccounts.length }}）
+          </a-button>
+          <template #overlay>
+            <a-menu>
+              <a-menu-item key="txt" @click="txtOpen = true">
+                <FileTextOutlined />
+                代付 TXT（序号 + 链接）
+              </a-menu-item>
+              <a-menu-item key="xlsx" @click="exportXlsx">
+                <FileExcelOutlined />
+                Excel（含邮箱、金额、状态）
+              </a-menu-item>
+            </a-menu>
+          </template>
+        </a-dropdown>
         <span class="spacer" />
         <a-button v-if="running" danger @click="abort">
           <template #icon><StopOutlined /></template>
@@ -700,6 +714,12 @@ function tierOf(row: Row): string {
         </template>
       </div>
     </template>
+
+    <PaymentLinkTxtModal
+      v-if="txtOpen"
+      :accounts="extractedAccounts"
+      @close="txtOpen = false"
+    />
   </div>
 </template>
 

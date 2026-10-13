@@ -18,10 +18,12 @@ import {
   DownOutlined,
   ExportOutlined,
   FileExcelOutlined,
+  FileTextOutlined,
   RedoOutlined,
   SafetyCertificateOutlined,
   SearchOutlined
 } from '@ant-design/icons-vue'
+import PaymentLinkTxtModal from '@/components/accounts/PaymentLinkTxtModal.vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
@@ -387,6 +389,21 @@ async function payableTargets(): Promise<{ list: Account[]; dropped: number }> {
 
 const preparing = ref(false)
 
+/** 代付 TXT：同样只给还能付款的，确认完再开弹窗 */
+const txtAccounts = ref<Account[] | null>(null)
+
+async function openTxt(): Promise<void> {
+  if (preparing.value) return
+  preparing.value = true
+  try {
+    const { list } = await payableTargets()
+    if (!list.length) return void message.info('没有还能付款的链接，可以先「重新提取」失效的')
+    txtAccounts.value = list
+  } finally {
+    preparing.value = false
+  }
+}
+
 async function copyLinks(format: 'full' | 'url'): Promise<void> {
   if (preparing.value) return
   preparing.value = true
@@ -613,15 +630,20 @@ function clearOne(account: Account): void {
           </a-menu>
         </template>
       </a-dropdown>
-      <a-dropdown :disabled="!targets.length || exporting">
-        <a-button :disabled="!targets.length" :loading="exporting">
+      <a-dropdown :disabled="!targets.length || exporting || preparing">
+        <a-button :disabled="!targets.length" :loading="exporting || preparing">
           <template #icon><FileExcelOutlined /></template>
-          导出 Excel
+          导出
         </a-button>
         <template #overlay>
           <a-menu>
-            <a-menu-item key="payable" @click="exportXlsx(true)">只导出可付款的</a-menu-item>
-            <a-menu-item key="all" @click="exportXlsx(false)">导出全部记录{{ scopeSuffix }}</a-menu-item>
+            <a-menu-item key="txt" @click="openTxt">
+              <FileTextOutlined />
+              代付 TXT（序号 + 链接，可付款的）
+            </a-menu-item>
+            <a-menu-divider />
+            <a-menu-item key="payable" @click="exportXlsx(true)">Excel：只导出可付款的</a-menu-item>
+            <a-menu-item key="all" @click="exportXlsx(false)">Excel：全部记录{{ scopeSuffix }}</a-menu-item>
           </a-menu>
         </template>
       </a-dropdown>
@@ -643,6 +665,12 @@ function clearOne(account: Account): void {
         </template>
       </a-dropdown>
     </div>
+
+    <PaymentLinkTxtModal
+      v-if="txtAccounts"
+      :accounts="txtAccounts"
+      @close="txtAccounts = null"
+    />
   </div>
 </template>
 

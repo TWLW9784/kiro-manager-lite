@@ -75,6 +75,71 @@ export function paymentLinkFilename(): string {
   return `kiro-payment-links-${exportStamp()}.xlsx`
 }
 
+// ============ 代付 TXT ============
+
+/** 两位补零 */
+function pad(n: number): string {
+  return String(n).padStart(2, '0')
+}
+
+/** 表头里的导出时间：2026/10/7 02:48:30（日期不补零、时间补零，与手工整理的文件一致） */
+function txtStamp(date: Date): string {
+  const ymd = `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}`
+  return `${ymd} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+export interface PaymentLinkTxtOptions {
+  /** 发给谁，写在表头，也进文件名 */
+  recipient: string
+  /** 加一行档位与应付金额合计，方便对方核对 */
+  includeAmount?: boolean
+  /** 每行链接后附上邮箱与档位（给自己留档用；发给代付的人一般不需要） */
+  includeEmail?: boolean
+  date?: Date
+}
+
+/**
+ * 代付用的纯文本：表头两行说明，空一行，然后「序号. 链接」一行一条。
+ * 整段发给代付的人，对方按序号逐个打开付款即可。
+ */
+export function buildPaymentLinkTxt(accounts: Account[], options: PaymentLinkTxtOptions): string {
+  const list = accounts.filter((a) => a.paymentLink)
+  const date = options.date ?? new Date()
+  const recipient = options.recipient.trim()
+
+  const header = [
+    `# 代付付款链接　${recipient ? `发给：${recipient}　` : ''}共 ${list.length} 条　导出于 ${txtStamp(date)}`,
+    '# 每条前面是序号，一行一个链接；整段发给对方，对方按序号逐个打开付款即可。'
+  ]
+
+  if (options.includeAmount) {
+    // 档位与金额按出现的种类归并：同一批多数是同一档位，罗列每条反而啰嗦
+    const tiers = [...new Set(list.map((a) => paymentLinkTier(a.paymentLink!)))]
+    const due = list.reduce((sum, a) => sum + (a.paymentLink!.amountDue ?? 0), 0)
+    const unknown = list.filter((a) => a.paymentLink!.amountDue === undefined).length
+    header.push(
+      `# 档位：${tiers.join(' / ') || '-'}　合计应付：${formatUsd(due)}${
+        unknown ? `（其中 ${unknown} 条未查到金额，未计入）` : ''
+      }`
+    )
+  }
+
+  const lines = list.map((account, index) => {
+    const link = account.paymentLink!
+    const suffix = options.includeEmail ? `　${account.email}　${paymentLinkTier(link)}` : ''
+    return `${index + 1}. ${link.url}${suffix}`
+  })
+
+  return `${header.join('\n')}\n\n${lines.join('\n')}\n`
+}
+
+/** 文件名：代付链接_迅速_共10条_20261007_0248.txt */
+export function paymentLinkTxtFilename(recipient: string, count: number, date = new Date()): string {
+  const name = recipient.trim().replace(/[\\/:*?"<>|\s]+/g, '') || '代付'
+  const ymd = `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}`
+  return `代付链接_${name}_共${count}条_${ymd}_${pad(date.getHours())}${pad(date.getMinutes())}.txt`
+}
+
 /**
  * 复制格式：
  * - full：每行「邮箱 订阅等级 支付链接」，空格分隔（三段本身都不含空格）
