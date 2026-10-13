@@ -24,6 +24,8 @@ try {
         'export_paid' => action_export_paid(),
         'sync' => action_sync(),
         'admin' => action_admin(),
+        'admin_login' => action_admin_login(),
+        'admin_logout' => action_admin_logout(),
         default => fail('未知操作', 404),
     };
 } catch (Throwable $e) {

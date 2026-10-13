@@ -317,3 +317,29 @@ function order_stats(int $orderId): array
     $row['remaining'] = max(0, (int) $row['quantity'] - (int) $row['paid'] - (int) $row['holding']);
     return $row;
 }
+
+// ============ 管理员（网页后台） ============
+
+/** 管理员网页会话：与客户会话分开存，config.php 里的 admin 账号登录 */
+function admin_session_ok(): bool
+{
+    start_session();
+    $admin = config()['admin'] ?? null;
+    return $admin && !empty($_SESSION['admin'])
+        && hash_equals((string) $admin['username'], (string) $_SESSION['admin']);
+}
+
+/**
+ * 管理接口的认证：桌面端带同步密钥（Bearer），网页后台带管理员会话 + CSRF。
+ * 两条路给的权限一样。
+ */
+function require_admin(): void
+{
+    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        require_sync_token();
+        return;
+    }
+    if (!admin_session_ok()) fail('请先登录管理后台', 401, 'login_required');
+    $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
+    if (!hash_equals($_SESSION['admin_csrf'] ?? '', $token)) fail('页面已过期，请刷新', 403, 'csrf');
+}

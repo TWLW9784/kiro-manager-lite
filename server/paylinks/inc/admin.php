@@ -12,7 +12,7 @@ declare(strict_types=1);
 function action_admin(): never
 {
     if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('请用 POST', 405);
-    require_sync_token();
+    require_admin();
     release_timeouts();
     $in = body();
     match ((string) ($in['op'] ?? '')) {
@@ -167,6 +167,17 @@ function admin_links(array $in): never
         $where[] = 'l.tier = ?';
         $args[] = (string) $in['tier'];
     }
+    if (!empty($in['order_id'])) {
+        $where[] = 'l.order_id = ?';
+        $args[] = (int) $in['order_id'];
+    }
+    // 搜索：链接里的任意一段（会话号 cs_live_…）或批次号
+    $q = trim((string) ($in['q'] ?? ''));
+    if ($q !== '') {
+        $where[] = '(l.url LIKE ? OR l.claim_batch LIKE ?)';
+        $like = '%' . addcslashes($q, '%_\\') . '%';
+        array_push($args, $like, $like);
+    }
     foreach (['from' => '>=', 'to' => '<'] as $key => $op) {
         $day = (string) ($in[$key] ?? '');
         if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $day)) continue;
@@ -287,5 +298,38 @@ function admin_order_update(array $in): never
     $args[] = $id;
     $pdo->prepare('UPDATE orders SET ' . implode(', ', $sets) . ', updated_at = ? WHERE id = ?')->execute($args);
     close_done_orders();
+    json_out(['ok' => true]);
+}
+
+// ============ 管理员网页登录 ============
+
+function action_admin_login(): never
+{
+    if ($_SERVER['REQUEST_METHOD'] !== 'POST') fail('请用 POST', 405);
+    $ip = client_ip();
+    $pdo = db();
+    $recent = $pdo->prepare('SELECT COUNT(*) FROM login_attempts WHERE ip = ? AND at > DATE_SUB(?, INTERVAL 15 MINUTE)');
+    $recent->execute([$ip, now()]);
+    if ((int) $recent->fetchColumn() >= 5) fail('尝试次数过多，请 15 分钟后再试', 429, 'too_many_attempts');
+    $admin = config()['admin'] ?? null;
+    $in = body();
+    $ok = $admin
+        && hash_equals((string) $admin['username'], (string) ($in['username'] ?? ''))
+        && password_verify((string) ($in['password'] ?? ''), (string) $admin['password_hash']);
+    if (!$ok) {
+        $pdo->prepare('INSERT INTO login_attempts (ip, at) VALUES (?, ?)')->execute([$ip, now()]);
+        fail('账号或密码不正确', 401, 'bad_credentials');
+    }
+    start_session();
+    session_regenerate_id(true);
+    $_SESSION['admin'] = $admin['username'];
+    $_SESSION['admin_csrf'] = bin2hex(random_bytes(16));
+    json_out(['ok' => true, 'csrf' => $_SESSION['admin_csrf']]);
+}
+
+function action_admin_logout(): never
+{
+    start_session();
+    unset($_SESSION['admin'], $_SESSION['admin_csrf']);
     json_out(['ok' => true]);
 }

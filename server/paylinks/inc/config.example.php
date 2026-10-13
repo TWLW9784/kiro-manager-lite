@@ -12,6 +12,11 @@ return [
         'username' => 'client',
         'password_hash' => '',
     ],
+    // 网页管理后台（manage.php）的管理员账号；不填就进不了网页后台，桌面端照常用同步密钥管理
+    'admin' => [
+        'username' => 'admin',
+        'password_hash' => '',
+    ],
     // 桌面端同步用的密钥（与客户密码无关），桌面端设置里填同一个值
     'sync_token' => '',
     // 领走多少分钟未付款就放回（放回时由桌面端换新链接）
