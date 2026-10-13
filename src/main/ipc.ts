@@ -172,6 +172,7 @@ import type {
   ChatTestInput,
   IpcResult,
   KiroModelInfo,
+  LogLevel,
   LogQuery,
   MachineIdField,
   ProxyClientTarget,
@@ -301,9 +302,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
   )
 
   /** 只查 Stripe 结算会话状态：已付款 / 未付款 / 已失效，不需要账号凭证 */
-  handle('accounts:checkout-status', async (_e, url: string) =>
-    ok({ status: await checkCheckoutStatus(url) })
-  )
+  handle('accounts:checkout-status', async (_e, url: string) => ok(await checkCheckoutStatus(url)))
 
   /** 用内置浏览器打开链接（Stripe 账单 / 结算页） */
   handle('app:open-in-app-browser', (_e, url: string, title?: string) =>
@@ -601,6 +600,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     await writeFile(result.filePath, buildZip(entries))
     revealExported(result.filePath)
     return ok({ saved: true, path: result.filePath, count: entries.length })
+  })
+
+  /**
+   * 渲染层写日志。
+   * 渲染进程的 console 不经过主进程的 console 接管，批量导入这类「事后要查」的记录
+   * 必须显式送过来，否则关掉弹窗就没了。
+   */
+  handle('log:write', (_e, level: LogLevel, message: string) => {
+    log(level, message)
+    return ok()
   })
 
   // 剪贴板监听：「粘贴文本导入」里连续收集聊天记录里的 JSON

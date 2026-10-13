@@ -21,6 +21,7 @@ import {
 import { useAccountsStore } from '@/stores/accounts'
 import { copyText } from '@/utils/ui'
 import { toPlain } from '@/utils/ipc'
+import { priceFields } from '@/utils/paymentLinkExtract'
 import { errorMessage } from '@shared/errors'
 import type { Account, SubscriptionPlan } from '@shared/types'
 
@@ -129,16 +130,13 @@ async function checkoutUrl(plan: SubscriptionPlan, action: string): Promise<stri
     }
     // 结算链接同样记成支付链接标记：付没付、失没失效都能在「新订阅管理」里跟进
     if (res.data.kind === 'checkout') {
-      const { price } = res.data
       accountsStore.setPaymentLink(props.account.id, {
         url: res.data.url,
         subscriptionType: plan.subscriptionType,
         planTitle: plan.title,
         amount: plan.amount,
         currency: plan.currency,
-        amountDue: price?.amountDue,
-        credit: price?.credit,
-        subtotal: price?.subtotal,
+        ...priceFields(res.data.price),
         stripeStatus: 'open',
         stripeCheckedAt: Date.now(),
         createdAt: Date.now()

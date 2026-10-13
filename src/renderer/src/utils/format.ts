@@ -228,6 +228,11 @@ export function formatUsd(amount: number): string {
   return `$${amount.toFixed(2)}`
 }
 
+/** 本地币种金额：人民币写成 ¥34.31，其余币种代码挂在后面 */
+export function formatLocal(amount: number, currency: string): string {
+  return currency === 'CNY' ? `¥${amount.toFixed(2)}` : `${amount.toFixed(2)} ${currency}`
+}
+
 /** API Key 的检查状态：卡片标签与筛选 chip 共用 */
 export const KEY_STATUS_META: Record<KeyStatus, { text: string; color: string }> = {
   normal: { text: '正常', color: 'green' },

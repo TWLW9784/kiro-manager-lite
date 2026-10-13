@@ -54,9 +54,11 @@ import type {
   ShellAutoApproveStatus,
   ShellAutoApproveTarget,
   SocialCallbackPayload,
+  LogLevel,
   LogQuery,
   LogQueryResult,
   ProactiveRenewalPayload,
+  CheckoutPrice,
   CheckoutProbeStatus,
   SubscriptionCheckout,
   SubscriptionEntry,
@@ -170,7 +172,9 @@ export interface Api {
   /** 只查可开通档位（批量提取支付链接选档位用） */
   getSubscriptionPlans: (account: Account) => Promise<IpcResult<SubscriptionPlanList>>
   /** 查 Stripe 结算会话状态（已付款 / 未付款 / 已失效） */
-  checkCheckoutStatus: (url: string) => Promise<IpcResult<{ status: CheckoutProbeStatus }>>
+  checkCheckoutStatus: (
+    url: string
+  ) => Promise<IpcResult<{ status: CheckoutProbeStatus; price?: CheckoutPrice }>>
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) => Promise<IpcResult<{ url: string }>>
 
@@ -241,6 +245,8 @@ export interface Api {
     filename: string
   ) => Promise<IpcResult<{ saved: boolean; path?: string; count?: number }>>
   writeClipboard: (text: string) => void
+  /** 渲染层写一条日志到日志中心（渲染进程的 console 不会自动进去） */
+  writeLog: (level: LogLevel, message: string) => Promise<IpcResult>
   /** 剪贴板监听：开始后每次复制新内容都会通过 onClipboardChanged 推过来 */
   startClipboardWatch: () => Promise<IpcResult>
   stopClipboardWatch: () => Promise<IpcResult>

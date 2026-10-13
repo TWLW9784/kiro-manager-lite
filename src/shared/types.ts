@@ -195,6 +195,8 @@ export interface CheckoutPrice {
   /** 结算页实际展示的币种与应付金额（如 CNY 34.31） */
   presentmentCurrency: string
   presentmentDue: number
+  /** 1 USD = 多少展示币种（如 6.96）；展示币种就是 USD 时为 1 */
+  presentmentRate: number
 }
 
 /**
@@ -231,6 +233,11 @@ export interface AccountPaymentLink {
   credit?: number
   /** 首期金额（USD，按剩余天数折算、抵扣前） */
   subtotal?: number
+  /** 结算页实际展示的今日应付（如 CNY 34.31）；国内 IP 下 Stripe 按人民币收 */
+  localDue?: number
+  localCurrency?: string
+  /** 提取时的汇率：1 USD = localRate 展示币种 */
+  localRate?: number
   /** 最近一次向 Stripe 查到的结算会话状态；没查过为空 */
   stripeStatus?: CheckoutSessionStatus
   /** stripeStatus 的查询时间戳（ms） */

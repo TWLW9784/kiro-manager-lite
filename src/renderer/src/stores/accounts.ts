@@ -551,7 +551,15 @@ export const useAccountsStore = defineStore('accounts', () => {
    * 批量写回 Stripe 结算会话状态，一次换引用 + 单次写盘。
    * 只改 url 对得上的那条：查询期间账号被重新提取过的话，新链接不能被旧状态覆盖。
    */
-  function setStripeStatuses(updates: { id: string; url: string; status: CheckoutSessionStatus }[]): void {
+  function setStripeStatuses(
+    updates: {
+      id: string
+      url: string
+      status: CheckoutSessionStatus
+      /** 查状态时顺带读到的金额（只有还能付的会话才有），用来补齐老链接缺的人民币价格 */
+      price?: Partial<AccountPaymentLink>
+    }[]
+  ): void {
     if (!updates.length) return
     const byId = new Map(updates.map((u) => [u.id, u]))
     const checkedAt = Date.now()
@@ -560,7 +568,15 @@ export const useAccountsStore = defineStore('accounts', () => {
       const update = byId.get(account.id)
       if (!update || account.paymentLink?.url !== update.url) return account
       changed = true
-      return { ...account, paymentLink: { ...account.paymentLink, stripeStatus: update.status, stripeCheckedAt: checkedAt } }
+      return {
+        ...account,
+        paymentLink: {
+          ...account.paymentLink,
+          ...update.price,
+          stripeStatus: update.status,
+          stripeCheckedAt: checkedAt
+        }
+      }
     })
     if (changed) {
       accounts.value = next
@@ -745,7 +761,34 @@ export const useAccountsStore = defineStore('accounts', () => {
       // 同上：running 一定要复位，否则会把后续的自动刷新全部挡掉
       task.value.running = false
     }
+    logImport(result, created)
     return result
+  }
+
+  /**
+   * 把导入结果写进日志中心。
+   *
+   * 导入弹窗里那份日志只活在弹窗的内存里，关掉就没了；而「这批导进来了哪些、
+   * 哪些被跳过」事后常要回查，所以这里显式送一份到主进程。
+   * 成功的只记邮箱清单（分批，单条日志有长度上限），失败与跳过的原因逐条记。
+   */
+  function logImport(result: BatchResult, created: Account[], label = '批量导入'): void {
+    const write = (level: 'info' | 'warn', text: string): void => {
+      void window.api.writeLog(level, `[Import] ${text}`)
+    }
+    write(
+      result.failed ? 'warn' : 'info',
+      `${label}结束：成功 ${result.success}，跳过 ${result.skipped}，失败 ${result.failed}`
+    )
+    // 一条日志放 20 个邮箱，几百条导入也不会被截断
+    for (let i = 0; i < created.length; i += 20) {
+      const part = created.slice(i, i + 20)
+      write('info', `新增 ${i + 1}-${i + part.length}：${part.map((a) => a.email).join('、')}`)
+    }
+    for (const line of result.messages) {
+      if (/校验失败|异常/.test(line)) write('warn', line)
+      else write('info', line)
+    }
   }
 
   /**
@@ -847,9 +890,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     // 只新增了分组（账号全跳过）也要落盘，否则新分组下次启动就丢了
     if (created.length || groups.value.length !== groupsBefore) persist(true)
     if (result.skipped) result.messages.push(`跳过 ${result.skipped} 个已存在的账号`)
-    console.info(
-      `[Account] 导入备份完成：新增 ${result.success}，跳过 ${result.skipped}，失败 ${result.failed}`
-    )
+    logImport(result, created, '恢复备份')
     return result
   }
 

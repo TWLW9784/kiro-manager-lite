@@ -106,7 +106,8 @@ export function extractCheckoutPrice(data: Json): CheckoutPrice {
     credit: usd(Math.max(0, -balance) + Math.max(0, discount)),
     recurring: recurring === undefined ? undefined : usd(recurring),
     presentmentCurrency: presentment.toUpperCase(),
-    presentmentDue: round2(due / divisor)
+    presentmentDue: round2(due / divisor),
+    presentmentRate: rate
   }
 }
 
@@ -135,23 +136,32 @@ export async function probeCheckoutPrice(url: string): Promise<CheckoutPrice> {
  *   所以提取后不到 1 小时就失效并不少见；
  * - 会话 id 不存在：404，按查询失败抛出。
  */
-export async function checkCheckoutStatus(url: string): Promise<CheckoutProbeStatus> {
+export async function checkCheckoutStatus(
+  url: string
+): Promise<{ status: CheckoutProbeStatus; price?: CheckoutPrice }> {
   let data: Json
   try {
     data = await initCheckout(url)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     if (error instanceof StripeInitError && error.status === 400) {
-      if (/expired/i.test(message)) return 'expired'
-      if (/no longer active|not active|inactive/i.test(message)) return 'inactive'
+      if (/expired/i.test(message)) return { status: 'expired' }
+      if (/no longer active|not active|inactive/i.test(message)) return { status: 'inactive' }
     }
     throw error
   }
   const status = String(data.status ?? '').toLowerCase()
   const paid = String(data.payment_status ?? '').toLowerCase()
-  if (status === 'complete' || paid === 'paid' || paid === 'no_payment_required') return 'complete'
-  if (status === 'expired') return 'expired'
-  return 'open'
+  if (status === 'complete' || paid === 'paid' || paid === 'no_payment_required') return { status: 'complete' }
+  if (status === 'expired') return { status: 'expired' }
+  // 还能付的会话顺带带回金额与汇率：老链接没存人民币价格的，查一次状态就补上
+  let price: CheckoutPrice | undefined
+  try {
+    price = extractCheckoutPrice(data)
+  } catch {
+    /* 金额解析不出来不影响状态 */
+  }
+  return { status: 'open', price }
 }
 
 /** 结算页的初始化数据：浏览器打开结算页时第一个请求拿到的就是它 */

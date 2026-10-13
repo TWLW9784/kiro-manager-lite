@@ -1,8 +1,8 @@
 // 单个账号提取支付链接：批量提取与「重新提取」共用同一套流程与优惠判定
 import { useAccountsStore } from '@/stores/accounts'
 import { errorMessage } from '@shared/errors'
-import type { CheckoutPrice, SubscriptionPlan } from '@shared/types'
-import { formatUsd, subscriptionLabel } from './format'
+import type { AccountPaymentLink, CheckoutPrice, SubscriptionPlan } from '@shared/types'
+import { formatLocal, formatUsd, subscriptionLabel } from './format'
 import { toPlain } from './ipc'
 
 /**
@@ -61,7 +61,55 @@ export function rejectReason(price: CheckoutPrice | undefined, setting: Discount
 
 export function priceLabel(price: CheckoutPrice): string {
   const credit = price.credit > 0 ? ` − 抵扣 ${formatUsd(price.credit)}` : ''
-  return `今付 ${formatUsd(price.amountDue)}（首期 ${formatUsd(price.subtotal)}${credit}）`
+  const local = price.presentmentCurrency !== 'USD' ? ` ≈ ${formatLocal(price.presentmentDue, price.presentmentCurrency)}` : ''
+  return `今付 ${formatUsd(price.amountDue)}${local}（首期 ${formatUsd(price.subtotal)}${credit}）`
+}
+
+/** 保存进 paymentLink 的金额字段；顺带记下最新汇率，档位卡片估算人民币价格要用 */
+export function priceFields(price: CheckoutPrice | undefined): Partial<AccountPaymentLink> {
+  if (!price) return {}
+  rememberRate(price.presentmentCurrency, price.presentmentRate)
+  return {
+    amountDue: price.amountDue,
+    credit: price.credit,
+    subtotal: price.subtotal,
+    localDue: price.presentmentDue,
+    localCurrency: price.presentmentCurrency,
+    localRate: price.presentmentRate
+  }
+}
+
+// ============ 汇率 ============
+
+/**
+ * 最近一次从 Stripe 结算页拿到的汇率（1 USD = rate 展示币种）。
+ * 只有提取过才知道 Stripe 给国内 IP 用的是哪个币种、多少汇率；
+ * 记在本地，档位卡片上「≈ ¥xx」的估算就用它，提取一次更新一次。
+ */
+const RATE_STORAGE_KEY = 'kal.paymentLink.rate'
+
+export interface StoredRate {
+  currency: string
+  rate: number
+  at: number
+}
+
+function rememberRate(currency: string, rate: number): void {
+  if (currency === 'USD' || !(rate > 0)) return
+  try {
+    localStorage.setItem(RATE_STORAGE_KEY, JSON.stringify({ currency, rate, at: Date.now() }))
+  } catch {
+    /* 不可写就不记 */
+  }
+}
+
+export function readRate(): StoredRate | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem(RATE_STORAGE_KEY) || 'null') as StoredRate | null
+    return saved && saved.rate > 0 && saved.currency ? saved : null
+  } catch {
+    return null
+  }
 }
 
 /** 下单所需的档位信息；重新提取时由已存的链接还原，不必再查一次档位列表 */
@@ -120,9 +168,7 @@ export async function extractPaymentLink(
       planTitle: target.title,
       amount: target.amount,
       currency: target.currency,
-      amountDue: price?.amountDue,
-      credit: price?.credit,
-      subtotal: price?.subtotal,
+      ...priceFields(price),
       // 刚生成的会话一定是 open，记上免得马上又去问一遍
       stripeStatus: 'open',
       stripeCheckedAt: Date.now(),

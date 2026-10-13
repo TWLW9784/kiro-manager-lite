@@ -4,7 +4,7 @@
 // Excel 前三列与复制出来的每一行都是这个顺序，其余信息排在后面。
 import { isAwaitingKiroSync, paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
 import type { Account, AccountGroup, XlsxSheet } from '@shared/types'
-import { PAYMENT_LINK_META, formatPrice, formatUsd, subscriptionLabel } from './format'
+import { PAYMENT_LINK_META, formatLocal, formatPrice, formatUsd, subscriptionLabel } from './format'
 import { exportStamp } from './transfer'
 
 /** 付款状态文案：Stripe 已付、Kiro 还没同步的单独标出来 */
@@ -17,6 +17,12 @@ export function paymentStateText(account: Account, nowMs = Date.now()): string {
 export function amountDueText(link: NonNullable<Account['paymentLink']>): string {
   if (link.amountDue === undefined) return `${formatPrice(link.amount, link.currency)}（标价）`
   return `今付 ${formatUsd(link.amountDue)}`
+}
+
+/** 结算页上的本地币种实付（如 ¥34.31）；老链接没存、或本来就按美元收的返回空串 */
+export function localDueText(link: NonNullable<Account['paymentLink']>): string {
+  if (link.localDue === undefined || !link.localCurrency || link.localCurrency === 'USD') return ''
+  return formatLocal(link.localDue, link.localCurrency)
 }
 
 /**
@@ -36,6 +42,7 @@ export function buildPaymentLinkSheet(accounts: Account[], groups: AccountGroup[
         paymentLinkTier(link),
         link.url,
         link.amountDue ?? null,
+        link.localCurrency === 'CNY' ? link.localDue ?? null : null,
         link.credit ?? null,
         link.subtotal ?? null,
         link.amount,
@@ -56,6 +63,7 @@ export function buildPaymentLinkSheet(accounts: Account[], groups: AccountGroup[
       { title: '订阅等级', width: 10 },
       { title: '支付链接', width: 80 },
       { title: '今天应付(USD)', width: 13, format: 'number', decimals: 2 },
+      { title: '今天应付(CNY)', width: 13, format: 'number', decimals: 2 },
       { title: '新用户抵扣(USD)', width: 15, format: 'number', decimals: 2 },
       { title: '首期金额(USD)', width: 13, format: 'number', decimals: 2 },
       { title: '月费标价(USD)', width: 13, format: 'number', decimals: 2 },
@@ -117,10 +125,14 @@ export function buildPaymentLinkTxt(accounts: Account[], options: PaymentLinkTxt
     const tiers = [...new Set(list.map((a) => paymentLinkTier(a.paymentLink!)))]
     const due = list.reduce((sum, a) => sum + (a.paymentLink!.amountDue ?? 0), 0)
     const unknown = list.filter((a) => a.paymentLink!.amountDue === undefined).length
+    // 人民币只在每条都有本地金额时才合计，缺一条就不写，免得给出一个偏低的数
+    const cny = list.every((a) => a.paymentLink!.localCurrency === 'CNY' && a.paymentLink!.localDue !== undefined)
+      ? list.reduce((sum, a) => sum + a.paymentLink!.localDue!, 0)
+      : undefined
     header.push(
       `# 档位：${tiers.join(' / ') || '-'}　合计应付：${formatUsd(due)}${
-        unknown ? `（其中 ${unknown} 条未查到金额，未计入）` : ''
-      }`
+        cny !== undefined ? `（≈ ${formatLocal(cny, 'CNY')}）` : ''
+      }${unknown ? `（其中 ${unknown} 条未查到金额，未计入）` : ''}`
     )
   }
 
@@ -140,18 +152,11 @@ export function paymentLinkTxtFilename(recipient: string, count: number, date = 
   return `代付链接_${name}_共${count}条_${ymd}_${pad(date.getHours())}${pad(date.getMinutes())}.txt`
 }
 
-/**
- * 复制格式：
- * - full：每行「邮箱 订阅等级 支付链接」，空格分隔（三段本身都不含空格）
- * - url：只有链接，一行一个
- */
-export function paymentLinkText(accounts: Account[], format: 'full' | 'url'): string {
+/** 复制出来的就是链接本身，一行一个；邮箱与档位要带的话走导出（Excel / 代付 TXT 的「附邮箱」） */
+export function paymentLinkText(accounts: Account[]): string {
   return accounts
     .filter((a) => a.paymentLink)
-    .map((a) => {
-      const link = a.paymentLink!
-      return format === 'url' ? link.url : `${a.email} ${paymentLinkTier(link)} ${link.url}`
-    })
+    .map((a) => a.paymentLink!.url)
     .join('\n')
 }
 

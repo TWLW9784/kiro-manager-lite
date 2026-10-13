@@ -40,12 +40,18 @@ import { now } from '@/utils/now'
 import { confirmDanger, copyText } from '@/utils/ui'
 import {
   amountDueText,
+  localDueText,
   buildPaymentLinkSheet,
   displayPaymentUrl,
   paymentLinkFilename,
   paymentLinkText
 } from '@/utils/paymentLinks'
-import { extractPaymentLink, readDiscountSetting, type PlanTarget } from '@/utils/paymentLinkExtract'
+import {
+  extractPaymentLink,
+  priceFields,
+  readDiscountSetting,
+  type PlanTarget
+} from '@/utils/paymentLinkExtract'
 import {
   isAwaitingKiroSync,
   isPaidSubscription,
@@ -53,7 +59,7 @@ import {
   paymentLinkTier,
   type PaymentLinkState
 } from '@shared/paymentLink'
-import type { Account, CheckoutSessionStatus } from '@shared/types'
+import type { Account, AccountPaymentLink, CheckoutSessionStatus } from '@shared/types'
 
 /** active：当前是否切到了这个面板，切过来时自动检查一次付款状态 */
 const props = defineProps<{ active?: boolean }>()
@@ -113,7 +119,7 @@ const scopeSuffix = computed(() => `（${selected.value.length ? '已选' : ''}$
 
 const columns = [
   { title: '账号', key: 'email', ellipsis: true },
-  { title: '等级 / 实付', key: 'plan', width: 110 },
+  { title: '等级 / 实付', key: 'plan', width: 120 },
   { title: '付款状态', key: 'state', width: 120 },
   { title: '当前订阅', key: 'current', width: 100 },
   { title: '提取时间', key: 'createdAt', width: 150 },
@@ -194,7 +200,12 @@ async function runCheck(list: Account[], silent: boolean): Promise<void> {
   try {
     // 第一步：Stripe
     let done = 0
-    const updates: { id: string; url: string; status: CheckoutSessionStatus }[] = []
+    const updates: {
+      id: string
+      url: string
+      status: CheckoutSessionStatus
+      price?: Partial<AccountPaymentLink>
+    }[] = []
     /** 会话已不能再付，但分不出是付完了还是失效了，留给第二步按 Kiro 档位定性 */
     const inactive: { id: string; url: string }[] = []
     show(`向 Stripe 确认付款状态 0/${stripeTargets.length}`)
@@ -204,7 +215,7 @@ async function runCheck(list: Account[], silent: boolean): Promise<void> {
         const res = await window.api.checkCheckoutStatus(url)
         if (!res.success || !res.data) stripeFailed++
         else if (res.data.status === 'inactive') inactive.push({ id: account.id, url })
-        else updates.push({ id: account.id, url, status: res.data.status })
+        else updates.push({ id: account.id, url, status: res.data.status, price: priceFields(res.data.price) })
       } catch {
         stripeFailed++
       } finally {
@@ -404,14 +415,14 @@ async function openTxt(): Promise<void> {
   }
 }
 
-async function copyLinks(format: 'full' | 'url'): Promise<void> {
+async function copyLinks(): Promise<void> {
   if (preparing.value) return
   preparing.value = true
   try {
     const { list, dropped } = await payableTargets()
     if (!list.length) return void message.info('没有还能付款的链接，可以先「重新提取」失效的')
     const skipped = dropped ? `，已跳过失效 / 已付款的 ${dropped} 条` : ''
-    copyText(paymentLinkText(list, format), `已复制 ${list.length} 条支付链接${skipped}`)
+    copyText(paymentLinkText(list), `已复制 ${list.length} 条支付链接${skipped}`)
   } finally {
     preparing.value = false
   }
@@ -477,7 +488,7 @@ function clearPaid(): void {
 }
 
 function copyOne(account: Account): void {
-  if (account.paymentLink) copyText(paymentLinkText([account], 'full'), '已复制：邮箱 订阅等级 支付链接')
+  if (account.paymentLink) copyText(account.paymentLink.url, '支付链接已复制')
 }
 
 async function openOne(account: Account): Promise<void> {
@@ -538,6 +549,9 @@ function clearOne(account: Account): void {
           <div>{{ paymentLinkTier(record.paymentLink) }}</div>
           <div class="muted small" :title="`标价 ${formatPrice(record.paymentLink.amount, record.paymentLink.currency)}`">
             {{ amountDueText(record.paymentLink) }}
+          </div>
+          <div v-if="localDueText(record.paymentLink)" class="small local-due">
+            ≈ {{ localDueText(record.paymentLink) }}
           </div>
         </template>
         <template v-else-if="column.key === 'state'">
@@ -616,20 +630,12 @@ function clearOne(account: Account): void {
           重新提取（{{ reExtractTargets.length }}）
         </a-button>
       </a-tooltip>
-      <a-dropdown :disabled="!targets.length || preparing">
-        <a-tooltip title="复制前会先向 Stripe 确认，只复制还能付款的；勾选了的按勾选原样复制">
-          <a-button :disabled="!targets.length" :loading="preparing">
-            <template #icon><CopyOutlined /></template>
-            复制可付款链接
-          </a-button>
-        </a-tooltip>
-        <template #overlay>
-          <a-menu>
-            <a-menu-item key="full" @click="copyLinks('full')">邮箱 订阅等级 支付链接</a-menu-item>
-            <a-menu-item key="url" @click="copyLinks('url')">仅链接（一行一个）</a-menu-item>
-          </a-menu>
-        </template>
-      </a-dropdown>
+      <a-tooltip title="一行一个链接。复制前会先向 Stripe 确认，只复制还能付款的；勾选了的按勾选原样复制">
+        <a-button :disabled="!targets.length" :loading="preparing" @click="copyLinks">
+          <template #icon><CopyOutlined /></template>
+          复制可付款链接
+        </a-button>
+      </a-tooltip>
       <a-dropdown :disabled="!targets.length || exporting || preparing">
         <a-button :disabled="!targets.length" :loading="exporting || preparing">
           <template #icon><FileExcelOutlined /></template>
@@ -687,4 +693,5 @@ function clearOne(account: Account): void {
 .email-cell { display: flex; flex-direction: column; min-width: 0; }
 .email-cell > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .url-cell { font-size: 11px; }
+.local-due { color: #fa8c16; }
 </style>

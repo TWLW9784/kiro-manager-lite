@@ -28,7 +28,7 @@ import PaymentLinkTxtModal from '@/components/accounts/PaymentLinkTxtModal.vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
-import { formatPrice, runPool } from '@/utils/format'
+import { formatLocal, formatPrice, formatUsd, runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
 import { toPlain } from '@/utils/ipc'
 import { now } from '@/utils/now'
@@ -43,6 +43,7 @@ import {
   discountRuleText,
   extractPaymentLink,
   readDiscountSetting,
+  readRate,
   writeDiscountSetting,
   type DiscountRule,
   type DiscountSetting
@@ -78,6 +79,54 @@ const planType = ref('')
 
 const paidPlans = computed(() => plans.value.filter((plan) => plan.amount > 0))
 const plan = computed(() => paidPlans.value.find((p) => p.subscriptionType === planType.value))
+
+/** 新用户余额，从首期里抵扣 */
+const NEW_USER_CREDIT = 20
+
+interface PlanPrice {
+  /** 优惠后实付（USD）：有实测用最近一次实测，没有就按整月估 */
+  due: number
+  /** 对应人民币；没提取过不知道汇率时为空 */
+  local?: string
+  /** true 表示来自最近一次实际提取，false 表示按整月 − $20 估算 */
+  measured: boolean
+}
+
+/**
+ * 档位卡片上的优惠后价格。
+ *
+ * 实付 = 首期（按到重置日剩余天数折算）− $20，每个账号剩余天数不同，提取前没法精确知道。
+ * 有这一档最近提取过的链接就用它的实测值；否则按整月标价 − $20 给个上限估算。
+ */
+const planPrices = computed(() => {
+  const rate = readRate()
+  const latest = new Map<string, NonNullable<Account['paymentLink']>>()
+  for (const account of accountsStore.accounts) {
+    const link = account.paymentLink
+    if (!link || link.amountDue === undefined) continue
+    const prev = latest.get(link.subscriptionType)
+    if (!prev || link.createdAt > prev.createdAt) latest.set(link.subscriptionType, link)
+  }
+  const result = new Map<string, PlanPrice>()
+  for (const item of paidPlans.value) {
+    const link = latest.get(item.subscriptionType)
+    if (link) {
+      const local =
+        link.localDue !== undefined && link.localCurrency && link.localCurrency !== 'USD'
+          ? formatLocal(link.localDue, link.localCurrency)
+          : undefined
+      result.set(item.subscriptionType, { due: link.amountDue!, local, measured: true })
+      continue
+    }
+    const due = Math.max(0, item.amount - NEW_USER_CREDIT)
+    result.set(item.subscriptionType, {
+      due,
+      local: rate ? formatLocal(due * rate.rate, rate.currency) : undefined,
+      measured: false
+    })
+  }
+  return result
+})
 
 function hasValidToken(a: Account): boolean {
   return !!a.credentials.accessToken && (a.credentials.expiresAt ?? 0) - Date.now() > 60_000
@@ -380,7 +429,7 @@ defineExpose({ abort })
 
 function copyRow(row: Row): void {
   const account = accountsStore.get(row.id)
-  if (account?.paymentLink) copyText(paymentLinkText([account], 'full'), '已复制：邮箱 订阅等级 支付链接')
+  if (account?.paymentLink) copyText(account.paymentLink.url, '支付链接已复制')
 }
 
 async function openRow(row: Row): Promise<void> {
@@ -389,10 +438,10 @@ async function openRow(row: Row): Promise<void> {
   if (!res.success) message.error(res.error || '打开支付页失败')
 }
 
-function copyAll(format: 'full' | 'url'): void {
+function copyAll(): void {
   const list = extractedAccounts.value
   if (!list.length) return
-  copyText(paymentLinkText(list, format), `已复制 ${list.length} 条支付链接`)
+  copyText(paymentLinkText(list), `已复制 ${list.length} 条支付链接`)
 }
 
 const exporting = ref(false)
@@ -464,68 +513,75 @@ function tierOf(row: Row): string {
             @click="planType = item.subscriptionType"
           >
             <span class="plan-name">{{ item.title }}</span>
-            <span class="plan-price">
-              标价 {{ formatPrice(item.amount, item.currency) }}
-              <span v-if="item.billingInterval" class="muted">{{ item.billingInterval }}</span>
-            </span>
+            <template v-if="planPrices.get(item.subscriptionType)">
+              <span class="plan-due">
+                <strong>{{ formatUsd(planPrices.get(item.subscriptionType)!.due) }}</strong>
+                <span v-if="planPrices.get(item.subscriptionType)!.local" class="plan-local">
+                  ≈ {{ planPrices.get(item.subscriptionType)!.local }}
+                </span>
+              </span>
+              <span class="plan-meta muted">
+                <s>{{ formatPrice(item.amount, item.currency) }}/月</s>
+                ·
+                {{ planPrices.get(item.subscriptionType)!.measured ? '最近实付' : '预估首付' }}
+              </span>
+            </template>
           </button>
+        </div>
+        <div class="hint muted">
+          优惠后价格 = 首期（按到重置日的剩余天数折算）− $20 新用户余额。
+          「最近实付」取这一档最近一次提取的实测值；没提取过的按整月 − $20 预估，实际一般更低。
         </div>
       </div>
 
-      <div class="section">
-        <div class="section-head">
-          <span class="section-title">优惠条件</span>
-          <span class="muted small">{{ ruleText }}</span>
-        </div>
-        <div class="rule-row">
-          <a-radio-group v-model:value="discountRule">
+      <!-- 以下三项统一成「左标签 + 右内容」的表单网格，标签宽度一致，控件上下对齐 -->
+      <div class="form-grid">
+        <span class="form-label">优惠条件</span>
+        <div class="form-field">
+          <a-radio-group v-model:value="discountRule" class="rule-group">
             <a-radio value="any">有新用户抵扣（$20 余额）</a-radio>
             <a-tooltip title="首期按到账号重置日的剩余天数折算，剩余天数越多今天要付的越多，所以同是新号金额也会不同">
-              <a-radio value="max">有抵扣且今天应付不超过</a-radio>
+              <a-radio value="max">
+                有抵扣且今天应付 ≤
+                <a-input-number
+                  v-model:value="maxAmount"
+                  :min="0"
+                  :precision="2"
+                  :disabled="discountRule !== 'max'"
+                  size="small"
+                  addon-before="$"
+                  class="inline-number"
+                  @click.stop
+                />
+              </a-radio>
             </a-tooltip>
+            <a-radio value="off">不校验金额</a-radio>
           </a-radio-group>
-          <a-input-number
-            v-model:value="maxAmount"
-            :min="0"
-            :precision="2"
-            :disabled="discountRule !== 'max'"
-            addon-before="$"
-            style="width: 130px"
-          />
-          <span class="spacer" />
-          <a-checkbox
-            :checked="discountRule === 'off'"
-            @change="(e: any) => (discountRule = e.target.checked ? 'off' : 'any')"
-          >
-            不校验金额
-          </a-checkbox>
         </div>
-      </div>
-      <div class="section">
-        <div class="section-head">
-          <span class="section-title">提取范围</span>
-          <a-tag color="default" :bordered="false">Free 账号 {{ scopeAccounts.length }} 个</a-tag>
-        </div>
-        <div class="scope-row">
-          <a-select
-            v-model:value="groupIds"
-            mode="multiple"
-            allow-clear
-            :options="groupOptions"
-            placeholder="全部分组"
-            :max-tag-count="2"
-            style="min-width: 220px; flex: 1 1 220px"
-          />
-          <a-select
-            v-model:value="order"
-            :options="[
-              { value: 'newest', label: '按导入时间：新 → 旧' },
-              { value: 'oldest', label: '按导入时间：旧 → 新' }
-            ]"
-            style="width: 190px"
-          />
-        </div>
-        <div class="checks">
+
+        <span class="form-label">提取范围</span>
+        <div class="form-field">
+          <div class="scope-row">
+            <a-tag :bordered="false" class="scope-tag">Free 账号 {{ scopeAccounts.length }} 个</a-tag>
+            <a-select
+              v-model:value="groupIds"
+              mode="multiple"
+              allow-clear
+              :options="groupOptions"
+              placeholder="全部分组"
+              :max-tag-count="2"
+              class="group-select"
+            />
+            <a-select
+              v-model:value="order"
+              :options="[
+                { value: 'newest', label: '导入时间 新 → 旧' },
+                { value: 'oldest', label: '导入时间 旧 → 新' }
+              ]"
+              class="order-select"
+            />
+          </div>
+          <div class="checks">
           <a-checkbox v-model:checked="skipExtracted">
             跳过已提取过的<span class="muted">（{{ breakdown.extracted }}）</span>
           </a-checkbox>
@@ -540,53 +596,54 @@ function tierOf(row: Row): string {
           <a-checkbox v-model:checked="skipAbnormal">
             跳过封禁 / 凭证失效的<span class="muted">（{{ breakdown.abnormal }}）</span>
           </a-checkbox>
-          <a-button
-            v-if="breakdown.noDiscount"
-            type="link"
-            size="small"
-            style="padding: 0"
-            @click="clearNoDiscount"
-          >
-            清除无优惠记录
-          </a-button>
+            <a-button
+              v-if="breakdown.noDiscount"
+              type="link"
+              size="small"
+              class="link-btn"
+              @click="clearNoDiscount"
+            >
+              清除无优惠记录
+            </a-button>
+          </div>
         </div>
 
-        <div class="quantity-row">
-          <span>提取数量</span>
-          <a-input-number
-            v-model:value="quantity"
-            :min="1"
-            :max="Math.max(1, breakdown.candidates.length)"
-            :precision="0"
-            placeholder="全部"
-            style="width: 120px"
-          />
-          <span class="muted">
-            符合条件 {{ breakdown.candidates.length }} 个，本次提取前 {{ takeCount }} 个
-          </span>
-          <span class="spacer" />
-          <span>并发</span>
-          <a-tooltip title="同时提取的账号数，最多 20。每个账号要过 Kiro 门户与 Stripe 三个请求，太高容易被限流">
+        <span class="form-label">数量</span>
+        <div class="form-field">
+          <div class="quantity-row">
             <a-input-number
-              v-model:value="concurrency"
+              v-model:value="quantity"
               :min="1"
-              :max="MAX_CONCURRENCY"
+              :max="Math.max(1, breakdown.candidates.length)"
               :precision="0"
-              style="width: 72px"
+              placeholder="全部"
+              class="qty-input"
             />
-          </a-tooltip>
+            <span class="muted">
+              符合条件 {{ breakdown.candidates.length }} 个，本次提取 <strong class="em">{{ takeCount }}</strong> 个
+            </span>
+            <span class="spacer" />
+            <a-tooltip title="同时提取的账号数，最多 20。每个账号要过 Kiro 门户与 Stripe 三个请求，太高容易被限流">
+              <span class="concurrency">
+                <span class="muted">并发</span>
+                <a-input-number
+                  v-model:value="concurrency"
+                  :min="1"
+                  :max="MAX_CONCURRENCY"
+                  :precision="0"
+                  class="concurrency-input"
+                />
+              </span>
+            </a-tooltip>
+          </div>
         </div>
       </div>
 
-      <a-alert
-        type="info"
-        show-icon
-        message="逐个生成 Stripe 结算链接并读取结算页金额（统一换算成美元）。新号的优惠是 Stripe 余额里的 $20，从首期扣；首期按到重置日的剩余天数折算，例如 Pro+ 剩 20 天时首期 $24.93，扣完今天付 $4.93，之后每月 $40。满足条件的才保存并标记为「待付款」，不满足的记为「无优惠」，下次默认跳过。结算链接会失效（最长 24 小时，同一账号重新生成后旧链接立即失效），失效的可以再次提取。"
-      />
-
-      <div class="footer">
+      <div class="footer setup-footer">
+        <span class="muted small footer-note">
+          满足条件的保存为「待付款」，不满足的记为「无优惠」下次跳过。链接最长 24 小时失效，同一账号重新生成后旧链接立即失效，失效的可以再提取。
+        </span>
         <a-button @click="emit('show-records')">查看提取记录</a-button>
-        <span class="spacer" />
         <a-button type="primary" :disabled="!plan || !takeCount || plansLoading" @click="start">
           <template #icon><CreditCardOutlined /></template>
           开始提取（{{ takeCount }} 个）
@@ -647,7 +704,7 @@ function tierOf(row: Row): string {
             <template v-else-if="row.state === 'ok'">
               <CheckCircleFilled class="ok-icon" />
               <span class="ok-text">已提取</span>
-              <a-tooltip title="复制：邮箱 订阅等级 支付链接">
+              <a-tooltip title="复制支付链接">
                 <a-button type="text" size="small" @click="copyRow(row)">
                   <template #icon><CopyOutlined /></template>
                 </a-button>
@@ -671,18 +728,12 @@ function tierOf(row: Row): string {
       </div>
 
       <div class="footer">
-        <a-dropdown :disabled="!extractedAccounts.length || running">
-          <a-button :disabled="!extractedAccounts.length || running">
+        <a-tooltip title="一行一个链接">
+          <a-button :disabled="!extractedAccounts.length || running" @click="copyAll">
             <template #icon><CopyOutlined /></template>
             复制链接（{{ extractedAccounts.length }}）
           </a-button>
-          <template #overlay>
-            <a-menu>
-              <a-menu-item key="full" @click="copyAll('full')">邮箱 订阅等级 支付链接</a-menu-item>
-              <a-menu-item key="url" @click="copyAll('url')">仅链接（一行一个）</a-menu-item>
-            </a-menu>
-          </template>
-        </a-dropdown>
+        </a-tooltip>
         <a-dropdown :disabled="!extractedAccounts.length || running">
           <a-button :disabled="!extractedAccounts.length || running" :loading="exporting">
             <template #icon><FileExcelOutlined /></template>
@@ -735,17 +786,17 @@ function tierOf(row: Row): string {
 
 .plans-stage { display: flex; align-items: center; gap: 10px; padding: 16px 0; }
 
-/* 档位卡片按可用宽度自动排，外观与导出弹窗的格式卡片一致 */
-.plan-options { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+/* 档位卡片：四档一排铺满，名称 / 优惠后价格 / 标价三行 */
+.plan-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
 .plan-option {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 8px 12px;
+  gap: 4px;
+  padding: 12px 14px;
   text-align: left;
   cursor: pointer;
   color: inherit;
-  border-radius: 10px;
+  border-radius: 12px;
   border: 2px solid var(--kal-border);
   background: transparent;
   transition: border-color 0.15s ease, background 0.15s ease;
@@ -756,11 +807,44 @@ function tierOf(row: Row): string {
   background: color-mix(in srgb, var(--kal-primary) 8%, transparent);
 }
 .plan-option.selected .plan-name { color: var(--kal-primary); }
-.plan-name { font-weight: 600; }
-.plan-price { font-size: 12px; }
+.plan-name { font-weight: 600; font-size: 13px; }
+.plan-due { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.plan-due strong { font-size: 20px; line-height: 1.2; }
+.plan-local { font-size: 13px; color: #fa8c16; font-weight: 600; }
+.plan-meta { font-size: 12px; }
+.hint { font-size: 12px; line-height: 1.6; }
 
-.rule-row, .scope-row, .quantity-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.checks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 18px; }
+/* 表单网格：左边标签列固定宽度，右边内容列；每行之间同样的间距 */
+.form-grid {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  align-items: start;
+  gap: 14px 12px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: var(--kal-block-bg);
+}
+.form-label { font-weight: 600; line-height: 32px; }
+.form-field { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+
+.rule-group { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 20px; min-height: 32px; }
+.rule-group :deep(.ant-radio-wrapper) { margin-inline-end: 0; align-items: center; }
+.inline-number { width: 110px; margin-left: 4px; }
+
+.scope-row, .quantity-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.scope-tag { margin: 0; line-height: 30px; padding: 0 10px; }
+.group-select { flex: 1 1 240px; min-width: 200px; }
+.order-select { width: 170px; }
+.checks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 20px; }
+.checks :deep(.ant-checkbox-wrapper) { margin-inline-start: 0; }
+.link-btn { padding: 0; height: auto; }
+.qty-input { width: 120px; }
+.em { color: var(--kal-primary); }
+.concurrency { display: inline-flex; align-items: center; gap: 8px; }
+.concurrency-input { width: 72px; }
+
+.setup-footer { gap: 10px; }
+.footer-note { flex: 1 1 auto; min-width: 0; line-height: 1.6; }
 
 .summary { display: flex; align-items: center; gap: 8px; font-size: 12px; flex-wrap: wrap; }
 
