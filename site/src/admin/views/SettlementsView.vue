@@ -4,7 +4,7 @@ import { computed, onMounted, ref } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
 import { num, short, usd, walletFresh } from '@site/shared/format'
-import { clientOptions, clients, loadClients, loadOverview, type AdminClient } from '../state'
+import { FILTER_EMPTY, clientOptions, clients, loadClients, loadOverview, type AdminClient } from '../state'
 import SettlementTable, { type Settlement } from '../components/SettlementTable.vue'
 import SettleModal from '../components/SettleModal.vue'
 
@@ -101,7 +101,7 @@ async function changed(): Promise<void> {
     <template #header>
       <div class="card-head">
         <h2>打款记录<span class="muted small"> {{ total }} 笔 · 合计 {{ num(sum).toFixed(2) }}</span></h2>
-        <el-select v-model="clientId" class="w-150" @change="(page = 1), reload()">
+        <el-select :empty-values="FILTER_EMPTY" v-model="clientId" class="w-150" @change="(page = 1), reload()">
           <el-option v-for="o in clientOptions" :key="String(o.value)" :value="o.value" :label="o.label" />
         </el-select>
         <el-button :icon="Refresh" :loading="loading" @click="reload" />

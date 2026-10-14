@@ -2,6 +2,8 @@
 /** 管理后台：总览 / 批次 / 结算 / 客户 / 链接 / 日志 */
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { Close, DataLine, Document, Expand, Link, List, Sort, User } from '@element-plus/icons-vue'
+// Element Plus 自带的文字（分页「50/page」、日期选择器、「No Data」）默认是英文
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { guard } from '@site/shared/api'
 import { loadClients, loadOverview, overview } from './state'
 import OverviewView from './views/OverviewView.vue'
@@ -70,6 +72,7 @@ onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
+  <el-config-provider :locale="zhCn">
   <!-- wide：后台表格列多，内容区最大宽度放到 1600（门户 1400） -->
   <div class="shell wide" :class="{ 'nav-open': navOpen }">
     <div v-if="navOpen" class="nav-backdrop" @click="navOpen = false" />
@@ -137,4 +140,5 @@ onUnmounted(() => clearInterval(timer))
       </main>
     </div>
   </div>
+  </el-config-provider>
 </template>

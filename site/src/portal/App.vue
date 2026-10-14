@@ -2,6 +2,10 @@
 /** 客户门户：侧栏 + 内容区。付款工作台 / 我的批次 / 已付款 / 结算记录 / 收款设置 */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { Close, Expand, Lightning, Document, QuestionFilled, Select, Sort, Wallet } from '@element-plus/icons-vue'
+// Element Plus 自带文字（分页、日期选择器、「No Data」）跟着门户的语言走，否则永远是英文
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import en from 'element-plus/es/locale/lang/en'
+import uzUz from 'element-plus/es/locale/lang/uz-uz'
 import { guard } from '@site/shared/api'
 import { lang, tt } from './i18n'
 import { helpOpen, loadMe, me } from './state'
@@ -30,6 +34,7 @@ const NAV: { key: View; icon: unknown; label: string }[] = [
 ]
 
 const stats = computed(() => me.value?.stats)
+const epLocale = computed(() => ({ zh: zhCn, en, uz: uzUz })[lang.value])
 
 function go(next: View): void {
   view.value = next
@@ -62,6 +67,7 @@ const initial = computed(() => (me.value?.client.display_name || me.value?.clien
 </script>
 
 <template>
+  <el-config-provider :locale="epLocale">
   <div class="shell" :class="{ 'nav-open': navOpen }">
     <div v-if="navOpen" class="nav-backdrop" @click="navOpen = false" />
     <aside class="sidebar">
@@ -130,6 +136,7 @@ const initial = computed(() => (me.value?.client.display_name || me.value?.clien
     </div>
     <HelpDialog @goto="go" />
   </div>
+  </el-config-provider>
 </template>
 
 <style scoped>

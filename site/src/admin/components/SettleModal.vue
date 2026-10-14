@@ -95,8 +95,8 @@ async function submit(): Promise<void> {
   if (!(await formRef.value?.validate().catch(() => false))) return
   const f = form.value
   if (f.to_address && !validAddress(f.to_address.trim())) return void ElMessage.error('收款地址格式不对')
+  // 交易哈希、凭证都选填；填了才校验格式
   if (f.tx_hash && !validTxHash(f.tx_hash.trim())) return void ElMessage.error('交易哈希格式不对')
-  if (!f.tx_hash.trim() && !proof.value) return void ElMessage.error('交易哈希和凭证至少填一个')
   saving.value = true
   try {
     await guard(async () => {
@@ -190,10 +190,10 @@ async function submit(): Promise<void> {
           </template>
         </div>
       </el-form-item>
-      <el-form-item label="交易哈希">
+      <el-form-item label="交易哈希（选填）">
         <el-input v-model="form.tx_hash" class="mono-input" placeholder="0x…（Polygon 上 66 位）" spellcheck="false" />
       </el-form-item>
-      <el-form-item label="付款凭证">
+      <el-form-item label="付款凭证（选填）">
         <el-upload
           :file-list="fileList"
           :before-upload="beforeUpload"
@@ -203,7 +203,7 @@ async function submit(): Promise<void> {
         >
           <el-button v-if="!fileList.length" :icon="Paperclip">选择截图 / PDF</el-button>
         </el-upload>
-        <div class="muted small">截图或 PDF，5 MB 以内。交易哈希和凭证至少给一个</div>
+        <div class="muted small">选填。截图或 PDF，5 MB 以内</div>
       </el-form-item>
       <el-form-item label="备注">
         <el-input v-model="form.note" maxlength="255" placeholder="如：10-13 两个批次合并打款" />

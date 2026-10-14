@@ -93,6 +93,14 @@ export const clientOptions = computed(() => [
   ...clients.value.map((c) => ({ value: c.id as number | '', label: c.display_name || c.username }))
 ])
 
+/**
+ * 给「全部 xx」用空串当值的筛选下拉用：:empty-values="FILTER_EMPTY"。
+ * Element Plus 默认把 ''、undefined、null 都当成「没选」，于是明明选中了「全部客户」
+ * 却显示英文 placeholder「Select」。只把 null / undefined 当成没选，空串就能正常显示。
+ * 只给筛选用：表单里靠空串显示「请选择」提示的下拉不要加。
+ */
+export const FILTER_EMPTY = [null, undefined]
+
 /** 桌面端多久没同步了（分钟）；null = 从没同步过 */
 export const desktopAgo = computed(() => {
   const o = overview.value

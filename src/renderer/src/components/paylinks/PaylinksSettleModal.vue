@@ -1,7 +1,7 @@
 <script setup lang="ts">
 /**
  * 记一笔打款：给客户转完虚拟币（默认 Polygon · USDT）后记下来。
- * 收款地址默认带出客户在门户里填的；交易哈希和凭证（截图 / PDF）至少给一个；挂到批次上会自动累加批次的已结金额。
+ * 收款地址默认带出客户在门户里填的；交易哈希和凭证（截图 / PDF）都选填；挂到批次上会自动累加批次的已结金额。
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { message, type UploadFile } from 'ant-design-vue'
@@ -102,8 +102,8 @@ async function submit(): Promise<void> {
   if (!clientId.value) return void message.error('请选择客户')
   if (!amount.value || amount.value <= 0) return void message.error('请填写金额')
   if (!addressOk.value) return void message.error('收款地址和网络对不上')
+  // 交易哈希、凭证都选填；填了才校验格式（和网页端、服务端一致）
   if (!txOk.value) return void message.error('交易哈希格式不对')
-  if (!txHash.value.trim() && !file.value) return void message.error('交易哈希和凭证至少填一个')
   saving.value = true
   try {
     await addSettlement(
@@ -174,10 +174,10 @@ async function submit(): Promise<void> {
           <span v-else-if="client" class="warn">客户还没填收款地址，请手动填写</span>
         </div>
       </a-form-item>
-      <a-form-item label="交易哈希" class="span-2" :validate-status="txOk ? '' : 'error'" :help="txOk ? undefined : '交易哈希格式不对'">
+      <a-form-item label="交易哈希（选填）" class="span-2" :validate-status="txOk ? '' : 'error'" :help="txOk ? undefined : '交易哈希格式不对'">
         <a-input v-model:value="txHash" class="mono" placeholder="0x…（Polygon 上 66 位）" />
       </a-form-item>
-      <a-form-item label="付款凭证" class="span-2" extra="截图或 PDF，5 MB 以内。交易哈希和凭证至少给一个">
+      <a-form-item label="付款凭证（选填）" class="span-2" extra="截图或 PDF，5 MB 以内">
         <a-upload
           :file-list="fileList"
           :before-upload="beforeUpload"

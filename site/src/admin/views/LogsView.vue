@@ -4,6 +4,7 @@ import { onMounted, ref, watch } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
 import { minutes, short } from '@site/shared/format'
+import { FILTER_EMPTY } from '../state'
 
 interface Log {
   id: number
@@ -141,7 +142,7 @@ watch(op, () => {
     <template #header>
       <div class="card-head">
         <h2>操作日志<span class="muted small"> {{ total }}</span></h2>
-        <el-select v-model="op" class="w-170">
+        <el-select :empty-values="FILTER_EMPTY" v-model="op" class="w-170">
           <el-option value="" label="全部操作" />
           <el-option v-for="(label, k) in OPS" :key="k" :value="k" :label="label" />
         </el-select>

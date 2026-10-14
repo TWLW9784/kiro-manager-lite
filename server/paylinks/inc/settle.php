@@ -126,7 +126,8 @@ function action_settlement_add(): never
     $paidAt = preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/', (string) ($in['paid_at'] ?? '')) ? str_replace('T', ' ', substr((string) $in['paid_at'], 0, 16)) . ':00' : now();
     // 备注必须是合法 UTF-8：不是的话 MySQL 会抛错变成 500，这里提前拦成能看懂的提示
     $note = clean_text($in['note'] ?? '', 255, '备注');
-    if ($tx === '' && empty($_FILES['proof']['name'])) fail('交易哈希和凭证至少给一个');
+    // 交易哈希和凭证都是选填：线下付款、现金、或者先记账后补凭证都很常见。
+    // 以前强制「至少给一个」，结果管理员绕开打款记录、直接手改批次的已结金额，账反而对不上
     [$file, $mime] = !empty($_FILES['proof']['name']) ? store_proof($_FILES['proof']) : ['', ''];
     $actor = !empty($_SERVER['HTTP_AUTHORIZATION']) ? 'desktop' : (string) ($_SESSION['admin'] ?? 'admin');
     try {

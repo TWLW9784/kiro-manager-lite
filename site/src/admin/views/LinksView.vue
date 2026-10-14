@@ -6,7 +6,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import PaylinkUrl from '@site/shared/PaylinkUrl.vue'
 import { api, guard } from '@site/shared/api'
 import { LINK_STATUS, cny, copyText, dt, num, usd } from '@site/shared/format'
-import { clientOptions } from '../state'
+import { FILTER_EMPTY, clientOptions } from '../state'
 
 const props = defineProps<{ clientId?: number; status?: string }>()
 
@@ -145,14 +145,14 @@ async function copyPage(): Promise<void> {
 
     <div class="toolbar">
       <el-input v-model="q" placeholder="搜 cs_live_… / 批次号" clearable class="w-200" />
-      <el-select v-model="clientId" class="w-150">
+      <el-select :empty-values="FILTER_EMPTY" v-model="clientId" class="w-150">
         <el-option v-for="o in clientOptions" :key="String(o.value)" :value="o.value" :label="o.label" />
       </el-select>
-      <el-select v-model="status" class="w-150">
+      <el-select :empty-values="FILTER_EMPTY" v-model="status" class="w-150">
         <el-option value="" label="全部状态" />
         <el-option v-for="(m, k) in LINK_STATUS" :key="k" :value="k" :label="m.text" />
       </el-select>
-      <el-select v-model="tier" class="w-130">
+      <el-select :empty-values="FILTER_EMPTY" v-model="tier" class="w-130">
         <el-option value="" label="全部档位" />
         <el-option v-for="t in TIERS" :key="t" :value="t" :label="t" />
       </el-select>

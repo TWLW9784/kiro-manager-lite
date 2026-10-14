@@ -4,7 +4,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
 import { ORDER_STATUS, SETTLE_STATUS, num, usd } from '@site/shared/format'
-import { clientOptions, loadClients, loadOverview, type AdminOrder } from '../state'
+import { FILTER_EMPTY, clientOptions, loadClients, loadOverview, type AdminOrder } from '../state'
 import OrderDrawer from '../components/OrderDrawer.vue'
 import OrderModal from '../components/OrderModal.vue'
 
@@ -81,7 +81,7 @@ async function changed(): Promise<void> {
 
     <div class="toolbar">
       <el-input v-model="q" placeholder="搜批次号 / 备注" clearable class="w-200" />
-      <el-select v-model="clientId" class="w-150" :options="clientOptions">
+      <el-select :empty-values="FILTER_EMPTY" v-model="clientId" class="w-150" :options="clientOptions">
         <el-option v-for="o in clientOptions" :key="String(o.value)" :value="o.value" :label="o.label" />
       </el-select>
       <el-radio-group v-model="status">
@@ -90,7 +90,7 @@ async function changed(): Promise<void> {
         <el-radio-button value="cancelled">已取消</el-radio-button>
         <el-radio-button value="">全部</el-radio-button>
       </el-radio-group>
-      <el-select v-model="settle" class="w-150">
+      <el-select :empty-values="FILTER_EMPTY" v-model="settle" class="w-150">
         <el-option value="" label="全部结算状态" />
         <el-option v-for="(m, k) in SETTLE_STATUS" :key="k" :value="k" :label="m.text" />
       </el-select>
