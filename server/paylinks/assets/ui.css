@@ -192,8 +192,18 @@ table.table { width: 100%; border-collapse: collapse; }
 .table tbody tr:last-child td { border-bottom: 0; }
 .table tbody tr:hover td { background: color-mix(in srgb, var(--surface-2) 60%, transparent); }
 .table tr.clickable { cursor: pointer; }
-.table td.url { max-width: 420px; }
+.table td.url { max-width: 260px; }
 .table td.url .mono { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 支付链接：只显示会话号缩写，点一下复制整条 */
+.paylink {
+  display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 2px 8px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--surface-2); color: var(--text-2); cursor: pointer;
+  font: 12px/1.6 var(--mono);
+}
+.paylink span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.paylink i { font-style: normal; opacity: 0.6; }
+.paylink:hover { color: var(--primary); border-color: color-mix(in srgb, var(--primary) 40%, transparent); }
+.paylink.void span { text-decoration: line-through; opacity: 0.6; }
 .table .c-check { width: 40px; }
 .table .c-n { width: 48px; color: var(--muted); }
 .empty { padding: 48px 18px; text-align: center; color: var(--muted); }

@@ -200,6 +200,15 @@ export interface Api {
     token: string,
     body: { op: string } & Record<string, unknown>
   ) => Promise<IpcResult<Record<string, unknown>>>
+  /** 代付链接网站：记一笔打款（multipart，可带凭证文件字节） */
+  paylinksSettlementAdd: (
+    serverUrl: string,
+    token: string,
+    fields: Record<string, string>,
+    proof?: { name: string; type: string; data: Uint8Array }
+  ) => Promise<IpcResult<Record<string, unknown>>>
+  /** 代付链接网站：下载付款凭证并用系统默认程序打开 */
+  paylinksProofOpen: (serverUrl: string, token: string, id: number) => Promise<IpcResult<{ path: string }>>
   /** 代付链接网站：推送 / 下架 / 回报，返回网站上的最新状态 */
   paylinksSync: (
     serverUrl: string,

@@ -19,7 +19,7 @@ import {
   getSubscriptionPlans
 } from './kiroSubscription'
 import { checkCheckoutStatus } from './stripeCheckout'
-import { accountRef, paylinksAdmin, paylinksSync, urlHash } from './paylinksSync'
+import { accountRef, paylinksAdmin, paylinksProof, paylinksSettlementAdd, paylinksSync, urlHash } from './paylinksSync'
 import { startClipboardWatch, stopClipboardWatch } from './clipboardWatch'
 import { clearKiroSsoCache, readKiroAuthToken, readLocalKiroCredentials, ssoCacheFile } from './kiroAuth'
 import { restartKiroIde } from './kiroProcess'
@@ -360,11 +360,32 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     ok(await paylinksSync(serverUrl, token, body))
   )
 
+  // 记一笔打款：带凭证文件（渲染进程读好的字节）
+  handle(
+    'paylinks:settlement-add',
+    async (_e, serverUrl: string, token: string, fields: Record<string, string>, proof?: { name: string; type: string; data: Uint8Array }) => {
+      const result = await paylinksSettlementAdd(serverUrl, token, fields, proof)
+      log('info', `[PaylinksAdmin] settlement_add client=${fields.client_id ?? ''} order=${fields.order_id ?? ''} ${fields.amount ?? ''} ${fields.token ?? ''}`)
+      return ok(result)
+    }
+  )
+
+  // 看付款凭证：下载到临时目录，用系统默认程序打开（图片 / PDF 都行）
+  handle('paylinks:proof-open', async (_e, serverUrl: string, token: string, id: number) => {
+    const { type, data } = await paylinksProof(serverUrl, token, id)
+    const ext = type.includes('pdf') ? 'pdf' : type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg'
+    const file = join(app.getPath('temp'), `paylinks-proof-${id}.${ext}`)
+    await writeFile(file, data)
+    const err = await shell.openPath(file)
+    if (err) throw new Error(err)
+    return ok({ path: file })
+  })
+
   handle('paylinks:admin', async (_e, serverUrl: string, token: string, body: unknown) => {
     const op = String((body as { op?: unknown })?.op ?? '')
     const result = await paylinksAdmin(serverUrl, token, body)
     // 改客户账号这类写操作记进日志；只读查询不记
-    if (/^client_|^link_/.test(op)) {
+    if (/^client_|^link_|^order_|^settlement_/.test(op)) {
       const b = body as Record<string, unknown>
       log('info', `[PaylinksAdmin] ${op} ${b.username ?? ''} ${b.id ?? ''} ${Array.isArray(b.ids) ? `${b.ids.length} 条` : ''}`.trim())
     }

@@ -12,6 +12,14 @@ const UI = (() => {
   const day = (v) => (v ? String(v).slice(0, 10) : '-')
   /** 0x1234…abcd */
   const short = (s, head = 6, tail = 4) => (s && s.length > head + tail + 1 ? `${s.slice(0, head)}…${s.slice(-tail)}` : s || '')
+  /** 支付链接只显示会话号缩写（cs_live_a1b2…z9），整条放在 title 里，点一下复制（页面的 data-copy 处理） */
+  function linkCell(url, { void: isVoid = false, copyTitle = 'Click to copy' } = {}) {
+    if (!url) return '<span class="muted">-</span>'
+    const id = String(url).match(/cs_(?:live|test)_[A-Za-z0-9]+/)?.[0]
+    const label = id ? (id.length > 22 ? `${id.slice(0, 14)}…${id.slice(-6)}` : id) : short(String(url), 28, 8)
+    return `<button type="button" class="paylink ${isVoid ? 'void' : ''}" data-copy="${esc(url)}" title="${esc(url)}
+${esc(copyTitle)}"><span>${esc(label)}</span><i aria-hidden="true">⧉</i></button>`
+  }
 
   // ============ 提示 ============
   function toast(text, kind = '') {
@@ -179,5 +187,5 @@ const UI = (() => {
     return { go, initial: $(`.nav [data-view="${first}"]`) ? first : $('.nav [data-view]').dataset.view }
   }
 
-  return { $, $$, esc, num, usd, cny, amount, dt, day, short, toast, copy, drawer, modal, confirm, pager, client, guard, mountNav }
+  return { $, $$, esc, num, usd, cny, amount, dt, day, short, linkCell, toast, copy, drawer, modal, confirm, pager, client, guard, mountNav }
 })()

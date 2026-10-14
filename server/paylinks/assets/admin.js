@@ -1,5 +1,5 @@
 // 管理后台：总览 / 批次（详情抽屉里结算、记打款、传凭证）。结算记录 / 客户 / 链接 / 日志在 admin-more.js
-const { $, esc, num, usd, cny, dt, short, toast, copy, drawer, modal, confirm, pager, guard } = UI
+const { $, esc, num, usd, cny, dt, short, linkCell, toast, copy, drawer, modal, confirm, pager, guard } = UI
 const CSRF = $('.shell').dataset.csrf
 const http = UI.client({ csrf: CSRF, errText: (d) => d?.error || '操作失败' })
 /** 管理接口：POST action=admin {op, ...} */
@@ -219,10 +219,9 @@ async function openOrder(id) {
         ${links.length ? `<div class="table-wrap"><table class="table stack"><thead><tr><th class="c-n">#</th><th>状态</th><th class="right">金额</th><th>链接</th><th>时间</th><th></th></tr></thead>
           <tbody>${links.map((l, i) => `<tr><td class="c-n">${i + 1}</td><td data-label="状态">${badge(LINK, l.status)}</td>
             <td data-label="金额" class="right num">${usd(l.amount_due)}</td>
-            <td data-label="链接" class="url"><span class="mono" title="${esc(l.url)}">${esc(l.url)}</span></td>
+            <td data-label="链接" class="url">${linkCell(l.url, { void: l.status === 'superseded', copyTitle: '点击复制整条链接' })}</td>
             <td data-label="时间" class="small text-2">${dt(l.paid_at || l.claimed_at)}</td>
-            <td class="right nowrap"><button class="btn sm" data-copy="${esc(l.url)}">复制</button>
-              ${l.status === 'checking' ? `<button class="btn sm" data-resolve="paid" data-id="${l.id}">确认已付</button><button class="btn sm danger" data-resolve="expired" data-id="${l.id}">确认失效</button>` : ''}</td>
+            <td class="right nowrap">${l.status === 'checking' ? `<button class="btn sm" data-resolve="paid" data-id="${l.id}">确认已付</button><button class="btn sm danger" data-resolve="expired" data-id="${l.id}">确认失效</button>` : ''}</td>
           </tr>`).join('')}</tbody></table></div>` : empty('没有链接')}
       </div>
       ${o.status === 'open' ? `<div class="card"><div class="card-head"><h2>批次操作</h2></div><div class="card-body btn-group">

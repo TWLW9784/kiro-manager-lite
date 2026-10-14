@@ -8,7 +8,7 @@ header('Cache-Control: no-store');
 header('Referrer-Policy: same-origin');
 $authed = admin_session_ok();
 $csrf = $authed ? ($_SESSION['admin_csrf'] ?? '') : '';
-$v = '11';
+$v = '12';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>

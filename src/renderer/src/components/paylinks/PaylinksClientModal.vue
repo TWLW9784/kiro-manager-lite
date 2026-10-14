@@ -7,7 +7,7 @@ import { computed, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { CopyOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { copyText } from '@/utils/ui'
-import { paylinksAdmin, randomPassword, type AdminClient } from '@/utils/paylinksAdmin'
+import { NETWORKS, TOKENS, paylinksAdmin, randomPassword, validAddress, type AdminClient } from '@/utils/paylinksAdmin'
 
 const props = defineProps<{ client: AdminClient | null; siteUrl: string }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -20,6 +20,11 @@ const enabled = ref(props.client ? !!props.client.enabled : true)
 const maxClaim = ref(props.client?.max_claim ?? 50)
 const timeout = ref(props.client?.claim_timeout_minutes ?? 180)
 const note = ref(props.client?.note ?? '')
+// 收款地址：客户自己在门户里填（要输密码）；客户在群里发过来时可以代填
+const walletNetwork = ref(props.client?.wallet_network || 'polygon')
+const walletToken = ref(props.client?.wallet_token || 'USDT')
+const walletAddress = ref(props.client?.wallet_address ?? '')
+const addressOk = computed(() => !walletAddress.value.trim() || validAddress(walletNetwork.value, walletAddress.value.trim()))
 const saving = ref(false)
 /** 保存成功后显示可复制的登录信息 */
 const savedInfo = ref('')
@@ -30,6 +35,7 @@ async function save(): Promise<void> {
   }
   if (!editing.value && password.value.length < 8) return void message.warning('密码至少 8 位')
   if (editing.value && password.value && password.value.length < 8) return void message.warning('密码至少 8 位')
+  if (!addressOk.value) return void message.warning('收款地址和网络对不上')
   saving.value = true
   try {
     await paylinksAdmin.saveClient({
@@ -40,7 +46,10 @@ async function save(): Promise<void> {
       enabled: enabled.value,
       max_claim: Number(maxClaim.value) || 50,
       claim_timeout_minutes: Number(timeout.value) || 180,
-      note: note.value.trim()
+      note: note.value.trim(),
+      wallet_network: walletNetwork.value,
+      wallet_token: walletToken.value,
+      wallet_address: walletAddress.value.trim()
     })
     emit('saved')
     if (password.value) {
@@ -91,6 +100,18 @@ async function save(): Promise<void> {
             <a-input-number v-model:value="timeout" :min="10" :max="10080" :precision="0" addon-after="分钟" style="width: 100%" />
           </a-form-item>
         </div>
+        <a-divider orientation="left" plain class="divider">收款地址（客户一般自己填，这里可代填）</a-divider>
+        <div class="grid">
+          <a-form-item label="网络">
+            <a-select v-model:value="walletNetwork" :options="NETWORKS.map((x) => ({ value: x.id, label: x.name }))" />
+          </a-form-item>
+          <a-form-item label="币种">
+            <a-select v-model:value="walletToken" :options="TOKENS.map((x) => ({ value: x, label: x }))" />
+          </a-form-item>
+        </div>
+        <a-form-item label="地址" :validate-status="addressOk ? '' : 'error'" :help="addressOk ? undefined : '地址和网络对不上'">
+          <a-input v-model:value="walletAddress" class="mono" placeholder="0x…" />
+        </a-form-item>
         <a-form-item label="备注（只有你能看到）">
           <a-input v-model:value="note" :maxlength="255" />
         </a-form-item>
@@ -120,6 +141,8 @@ async function save(): Promise<void> {
 
 <style scoped>
 .title { display: inline-flex; align-items: center; gap: 8px; }
+.divider { margin: 4px 0 10px; font-size: 12px; }
+.mono :deep(input), .mono { font-family: ui-monospace, Consolas, monospace; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 .gen { cursor: pointer; color: var(--kal-muted); }
 .gen:hover { color: var(--kal-primary); }

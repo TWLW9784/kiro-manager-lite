@@ -252,7 +252,9 @@ function action_proof(): never
     $stmt->execute([$id]);
     $row = $stmt->fetch();
     if (!$row || $row['proof_file'] === '') fail('凭证不存在', 404);
-    if (!admin_session_ok()) {
+    $bearer = preg_match('/^Bearer\s+(.+)$/i', (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? ''), $m) ? trim($m[1]) : '';
+    $desktop = $bearer !== '' && (string) (config()['sync_token'] ?? '') !== '' && hash_equals((string) config()['sync_token'], $bearer);
+    if (!$desktop && !admin_session_ok()) {
         $client = current_client();
         if (!$client || (int) $client['id'] !== (int) $row['client_id']) fail('凭证不存在', 404);
     }

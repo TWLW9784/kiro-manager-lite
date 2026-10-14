@@ -1,5 +1,5 @@
 // 客户门户：概览 / 我的批次（详情抽屉）/ 待付款 / 已付款 / 结算记录 / 收款设置。全部服务端分页
-const { $, esc, num, usd, cny, dt, short, toast, copy, drawer, modal, confirm, pager, guard } = UI
+const { $, esc, num, usd, cny, dt, short, linkCell, toast, copy, drawer, modal, confirm, pager, guard } = UI
 const api = UI.client({ csrf: $('.shell').dataset.csrf, errText: (d) => tError(d, 'network_error') })
 const tt = (k, p) => t(k, p)
 
@@ -157,10 +157,9 @@ async function openOrder(id) {
           </tr></thead><tbody>${links.map((l, i) => `<tr>
             <td class="c-n">${i + 1}</td><td data-label="${esc(t('col_status'))}">${linkBadge(l.status)}</td>
             <td data-label="${esc(t('col_amount'))}" class="right num">${usd(l.amount_due)}<div class="small muted">${cny(l.amount_cny)}</div></td>
-            <td data-label="${esc(t('col_link'))}" class="url">${l.url ? `<span class="mono" title="${esc(l.url)}">${esc(l.url)}</span>` : `<span class="muted small">${esc(t('void_hint'))}</span>`}</td>
+            <td data-label="${esc(t('col_link'))}" class="url">${l.url ? linkCell(l.url, { copyTitle: t('click_copy') }) : `<span class="muted small">${esc(t('void_hint'))}</span>`}</td>
             <td data-label="${esc(t('col_time'))}" class="small text-2">${dt(l.paid_at || l.claimed_at)}</td>
-            <td class="right nowrap">${l.url && l.status === 'claimed' ? `<button class="btn sm" data-copy="${esc(l.url)}">${esc(t('copy'))}</button>` : ''}
-              ${l.status === 'claimed' && o.source !== 'offline' ? `<button class="btn sm ghost" data-replace="${l.id}">${esc(t('replace'))}</button>` : ''}</td>
+            <td class="right nowrap">${l.status === 'claimed' && o.source !== 'offline' ? `<button class="btn sm ghost" data-replace="${l.id}">${esc(t('replace'))}</button>` : ''}</td>
           </tr>`).join('')}</tbody></table></div>` : empty(t('no_links'))}
       </div>
       <div class="card">
@@ -248,10 +247,9 @@ async function viewPending() {
             <td class="c-check"><input type="checkbox" data-sel="${l.id}" ${S.selected.has(String(l.id)) ? 'checked' : ''} ${checking ? 'disabled' : ''} aria-label="${esc(t('select'))}"></td>
             <td data-label="${esc(t('col_batch'))}">${l.code ? `<button class="link-btn" data-order="${l.order_id}">${esc(l.code)}</button>` : '-'}<div class="small muted">${esc(l.tier)}</div></td>
             <td data-label="${esc(t('col_amount'))}" class="right num">${usd(l.amount_due)}<div class="small muted">${cny(l.amount_cny)}</div></td>
-            <td data-label="${esc(t('col_link'))}" class="url"><span class="mono" title="${esc(l.url)}">${esc(l.url)}</span></td>
+            <td data-label="${esc(t('col_link'))}" class="url">${linkCell(l.url, { copyTitle: t('click_copy') })}</td>
             <td data-label="${esc(t('col_left'))}" class="nowrap">${checking ? linkBadge('checking') : `<span class="${l.expires_in < 900 ? 'warn' : 'text-2'} small">${esc(left(l.expires_in))}</span>`}</td>
-            <td class="right nowrap"><button class="btn sm" data-copy="${esc(l.url)}">${esc(t('copy'))}</button>
-              ${!checking && l.source !== 'offline' && l.order_id ? `<button class="btn sm ghost" data-replace="${l.id}">${esc(t('replace'))}</button>` : ''}</td>
+            <td class="right nowrap">${!checking && l.source !== 'offline' && l.order_id ? `<button class="btn sm ghost" data-replace="${l.id}">${esc(t('replace'))}</button>` : ''}</td>
           </tr>`
         }).join('')}</tbody></table></div>` : empty(t('no_claimed'), t('no_claimed_tip'))}
       <div class="pager" id="pending-pager"></div>
@@ -318,7 +316,7 @@ async function viewPaid() {
         <td data-label="${esc(t('col_paid_at'))}" class="nowrap">${dt(l.paid_at)}</td>
         <td data-label="${esc(t('col_batch'))}">${l.code ? `<button class="link-btn" data-order="${l.order_id}">${esc(l.code)}</button>` : '-'}<div class="small muted">${esc(l.tier)}</div></td>
         <td data-label="${esc(t('col_amount'))}" class="right num">${usd(l.amount_due)}<div class="small muted">${cny(l.amount_cny)}</div></td>
-        <td data-label="${esc(t('col_link'))}" class="url"><span class="mono" title="${esc(l.url)}">${esc(l.url)}</span></td>
+        <td data-label="${esc(t('col_link'))}" class="url">${linkCell(l.url, { copyTitle: t('click_copy') })}</td>
       </tr>`).join('')}</tbody></table></div>` : empty(t('no_paid'))}
     <div class="pager" id="paid-pager"></div>
   </div>`

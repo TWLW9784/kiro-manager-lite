@@ -18,6 +18,14 @@ export interface AdminClient {
   paid_usd: string | null
   paid_cny: string | null
   last_paid_at: string | null
+  wallet_network: string
+  wallet_token: string
+  wallet_address: string
+  wallet_updated_at: string | null
+  /** 已结（USD）= 批次已结金额 + 没挂批次的打款 */
+  settled: number
+  /** 未结 = 已付金额 − 已结 */
+  unsettled: number
 }
 
 export interface AdminLink {
@@ -45,6 +53,9 @@ export interface AdminOverview {
   by_status: { status: string; tier: string; n: string; usd: string | null; cny: string | null }[]
   daily: { day: string; client_id: number | null; client: string; n: string; usd: string | null; cny: string | null }[]
   last_stripe_check: string | null
+  desktop: { at: string; version: string; last_summary: string; last_error: string } | null
+  stuck_checking: number
+  settle: { due: number; settled: number; unsettled_orders: number; open_orders: number }
 }
 
 export interface ClientInput {
@@ -56,6 +67,9 @@ export interface ClientInput {
   max_claim: number
   claim_timeout_minutes: number
   note: string
+  wallet_network?: string
+  wallet_token?: string
+  wallet_address?: string
 }
 
 /** 网站上链接状态的中文名与颜色 */
@@ -110,6 +124,17 @@ export const paylinksAdmin = {
   revokeLinks: (ids: number[]) => call<{ revoked: number }>({ op: 'link_revoke', ids }),
   orders: (filter: { client_id?: number; status?: string } = {}) =>
     call<{ orders: AdminOrder[] }>({ op: 'orders', ...filter }).then((r) => r.orders),
+  /** 分页版：带筛选、搜索、按 id 取单个 */
+  ordersPage: (filter: { id?: number; client_id?: number; status?: string; settle?: string; q?: string; page: number; page_size: number }) =>
+    call<{ total: number; page: number; page_size: number; orders: AdminOrder[] }>({ op: 'orders', ...filter }),
+  settleOrder: (input: { id: number; settle_status?: SettleStatus; settled_amount?: number; settle_note?: string }) =>
+    call({ op: 'order_settle', ...input }),
+  settlements: (filter: { client_id?: number; order_id?: number; page?: number; page_size?: number }) =>
+    call<{ total: number; sum: number; page: number; page_size: number; settlements: AdminSettlement[] }>({ op: 'settlements', ...filter }),
+  deleteSettlement: (id: number) => call({ op: 'settlement_delete', id }),
+  logs: (filter: { filter_op?: string; page: number; page_size: number }) =>
+    call<{ total: number; page: number; page_size: number; logs: AdminLog[] }>({ op: 'logs', ...filter }),
+  resolveLink: (id: number, result: 'paid' | 'expired') => call({ op: 'link_resolve', id, result }),
   createOrder: (input: { client_id: number; tier: string; quantity: number; replace_limit?: number; note?: string }) =>
     call<{ id: number; code: string }>({ op: 'order_create', ...input }),
   updateOrder: (input: { id: number; quantity?: number; replace_limit?: number; status?: 'cancelled' | 'done' }) =>
@@ -147,6 +172,16 @@ export interface AdminOrder {
   replace_limit: number
   replaced: number
   status: 'open' | 'done' | 'cancelled'
+  settle_status: SettleStatus
+  settled_amount: string
+  settled_at: string | null
+  settle_note: string
+  /** 打款记录条数 */
+  settlements: string | null
+  wallet_network: string | null
+  wallet_token: string | null
+  wallet_address: string | null
+  wallet_updated_at: string | null
   /** site 网站派单；offline 线下（TXT / Excel）发出后补建，不从池子领 */
   source: 'site' | 'offline'
   note: string
@@ -171,4 +206,94 @@ export function randomPassword(length = 12): string {
   const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
   const bytes = crypto.getRandomValues(new Uint8Array(length))
   return Array.from(bytes, (b) => chars[b % chars.length]).join('')
+}
+
+export type SettleStatus = 'unsettled' | 'partial' | 'settled'
+
+export const SETTLE_STATUS_META: Record<SettleStatus, { text: string; color: string }> = {
+  unsettled: { text: '未结算', color: 'orange' },
+  partial: { text: '部分结算', color: 'blue' },
+  settled: { text: '已结算', color: 'green' }
+}
+
+/** 一笔打款（结算记录） */
+export interface AdminSettlement {
+  id: number
+  client_id: number
+  client: string | null
+  order_id: number | null
+  code: string | null
+  amount: string
+  token: string
+  network: string
+  network_name: string
+  to_address: string
+  tx_hash: string
+  tx_url: string | null
+  has_proof: boolean
+  proof_mime: string
+  note: string
+  created_by: string
+  paid_at: string
+  created_at: string
+}
+
+export interface AdminLog {
+  id: number
+  at: string
+  actor: string
+  ip: string
+  op: string
+  detail: string
+}
+
+/** 收款网络：与 server/paylinks/inc/lib.php 的 NETWORKS 一致，地址格式用于前端预校验 */
+export const NETWORKS = [
+  { id: 'polygon', name: 'Polygon', evm: true },
+  { id: 'ethereum', name: 'Ethereum', evm: true },
+  { id: 'bsc', name: 'BNB Chain', evm: true },
+  { id: 'arbitrum', name: 'Arbitrum', evm: true },
+  { id: 'tron', name: 'Tron', evm: false }
+] as const
+export const TOKENS = ['USDT', 'USDC'] as const
+export const networkName = (id: string | null | undefined): string => NETWORKS.find((n) => n.id === id)?.name ?? (id || '-')
+export function validAddress(network: string, address: string): boolean {
+  return NETWORKS.find((n) => n.id === network)?.evm === false
+    ? /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address)
+    : /^0x[0-9a-fA-F]{40}$/.test(address)
+}
+export function validTxHash(network: string, hash: string): boolean {
+  return network === 'tron' ? /^[0-9a-fA-F]{64}$/.test(hash) : /^0x[0-9a-fA-F]{64}$/.test(hash)
+}
+/** 收款地址 24 小时内改过：打款前提醒先跟客户确认 */
+export function walletFresh(updatedAt: string | null | undefined): boolean {
+  return !!updatedAt && Date.now() - Date.parse(`${updatedAt.replace(' ', 'T')}+08:00`) < 864e5
+}
+
+/** 记一笔打款（multipart，带凭证文件） */
+export async function addSettlement(
+  fields: { client_id: number; order_id?: number | null; amount: number; token: string; network: string; to_address: string; tx_hash: string; paid_at: string; note: string },
+  proof?: File | null
+): Promise<{ id: number }> {
+  const s = useSettingsStore().settings
+  const flat: Record<string, string> = {}
+  for (const [k, v] of Object.entries(fields)) if (v !== undefined && v !== null && v !== '') flat[k] = String(v)
+  const file = proof ? { name: proof.name, type: proof.type, data: new Uint8Array(await proof.arrayBuffer()) } : undefined
+  const res = await window.api.paylinksSettlementAdd(s.paylinksServerUrl, s.paylinksSyncToken, flat, file)
+  if (!res.success || !res.data) throw new Error(res.error || '记录打款失败')
+  return res.data as { id: number }
+}
+
+/** 下载付款凭证并用系统默认程序打开 */
+export async function openProof(id: number): Promise<void> {
+  const s = useSettingsStore().settings
+  const res = await window.api.paylinksProofOpen(s.paylinksServerUrl, s.paylinksSyncToken, id)
+  if (!res.success) throw new Error(res.error || '打开凭证失败')
+}
+
+/** 结算会话号缩写：cs_live_a1b2…z9，界面上不展开整条链接 */
+export function shortLink(url: string): string {
+  const id = url.match(/cs_(?:live|test)_[A-Za-z0-9]+/)?.[0]
+  if (id) return id.length > 22 ? `${id.slice(0, 14)}…${id.slice(-6)}` : id
+  return url.length > 40 ? `${url.slice(0, 28)}…${url.slice(-8)}` : url
 }

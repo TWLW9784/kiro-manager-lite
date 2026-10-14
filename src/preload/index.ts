@@ -72,6 +72,9 @@ const api = {
     invoke('paylinks:sync', serverUrl, token, body),
   paylinksAdmin: (serverUrl: string, token: string, body: unknown) =>
     invoke('paylinks:admin', serverUrl, token, body),
+  paylinksSettlementAdd: (serverUrl: string, token: string, fields: Record<string, string>, proof?: unknown) =>
+    invoke('paylinks:settlement-add', serverUrl, token, fields, proof),
+  paylinksProofOpen: (serverUrl: string, token: string, id: number) => invoke('paylinks:proof-open', serverUrl, token, id),
   /** 用内置浏览器打开链接 */
   openInAppBrowser: (url: string, title?: string) =>
     invoke('app:open-in-app-browser', url, title),

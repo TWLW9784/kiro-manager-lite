@@ -136,10 +136,9 @@ async function viewLinks() {
         <td data-label="档位">${esc(l.tier)}</td>
         <td data-label="金额" class="right num">${usd(l.amount_due)}<div class="small muted">${cny(l.amount_cny)}</div></td>
         <td data-label="客户">${esc(l.client || '-')}</td>
-        <td data-label="链接" class="url"><span class="mono" title="${esc(l.url)}">${esc(l.url)}</span></td>
+        <td data-label="链接" class="url">${linkCell(l.url, { void: l.status === 'superseded', copyTitle: '点击复制整条链接' })}</td>
         <td data-label="时间" class="small text-2 nowrap">${l.paid_at ? `付 ${dt(l.paid_at)}` : l.claimed_at ? `领 ${dt(l.claimed_at)}` : `提 ${dt(l.extracted_at)}`}</td>
-        <td class="right nowrap"><button class="btn sm" data-copy="${esc(l.url)}">复制</button>
-          ${l.status === 'checking' ? `<button class="btn sm" data-resolve="paid" data-id="${l.id}">已付</button><button class="btn sm danger" data-resolve="expired" data-id="${l.id}">失效</button>` : ''}</td>
+        <td class="right nowrap">${l.status === 'checking' ? `<button class="btn sm" data-resolve="paid" data-id="${l.id}">已付</button><button class="btn sm danger" data-resolve="expired" data-id="${l.id}">失效</button>` : ''}</td>
       </tr>`).join('')}</tbody></table></div>` : empty('没有符合条件的链接')}
     <div class="pager" id="links-pager"></div>
   </div>`

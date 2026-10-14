@@ -6,11 +6,12 @@
  */
 import { computed, ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
-import { ExportOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons-vue'
+import { ReloadOutlined, RollbackOutlined } from '@ant-design/icons-vue'
+import PaylinkUrl from '@/components/paylinks/PaylinkUrl.vue'
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
-import { copyText, confirmDanger } from '@/utils/ui'
+import { confirmDanger } from '@/utils/ui'
 import {
   LINK_STATUS_META,
   REFRESH_REASON_TEXT,
@@ -98,12 +99,12 @@ const tierOptions = ['pro', 'pro+', 'promax', 'power'].map((v) => ({ value: v, l
 
 const columns = [
   { title: '账号', key: 'account', ellipsis: true },
+  { title: '链接', key: 'url', width: 210 },
   { title: '档位 / 金额', key: 'tier', width: 120 },
   { title: '状态', key: 'status', width: 110 },
   { title: '客户', key: 'client', width: 110, ellipsis: true },
   { title: '领取', key: 'claimed', width: 110 },
-  { title: '付款', key: 'paid', width: 110 },
-  { title: '', key: 'actions', width: 70 }
+  { title: '付款', key: 'paid', width: 110 }
 ]
 
 const rowSelection = computed(() => ({
@@ -183,8 +184,8 @@ function revoke(): void {
       <template #bodyCell="{ column, record }">
         <template v-if="column.key === 'account'">
           <div class="email">{{ emailOf(record) }}</div>
-          <div class="url mono muted" :title="privacy ? undefined : record.url">{{ privacy ? '' : record.url }}</div>
         </template>
+        <template v-else-if="column.key === 'url'"><PaylinkUrl :url="record.url" :void="record.status === 'superseded'" /></template>
         <template v-else-if="column.key === 'tier'">
           <div>{{ record.tier }}</div>
           <div class="muted small">
@@ -202,13 +203,6 @@ function revoke(): void {
         <template v-else-if="column.key === 'client'">{{ record.client ?? '-' }}</template>
         <template v-else-if="column.key === 'claimed'"><span class="small">{{ short(record.claimed_at) }}</span></template>
         <template v-else-if="column.key === 'paid'"><span class="small ok">{{ short(record.paid_at) }}</span></template>
-        <template v-else-if="column.key === 'actions'">
-          <a-tooltip title="复制链接">
-            <a-button type="text" size="small" @click="copyText(record.url, '已复制链接')">
-              <template #icon><ExportOutlined /></template>
-            </a-button>
-          </a-tooltip>
-        </template>
       </template>
     </a-table>
   </a-card>
@@ -217,8 +211,6 @@ function revoke(): void {
 <style scoped>
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .email { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.url { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.mono { font-family: ui-monospace, Consolas, monospace; }
 .muted { color: var(--kal-muted); }
 .small { font-size: 12px; }
 .ok { color: #52c41a; }
