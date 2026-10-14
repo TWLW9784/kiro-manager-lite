@@ -40,7 +40,33 @@ body {
   overflow: hidden;
   border-right: 1px solid var(--kal-border);
   background: var(--kal-sidebar-bg);
+  /* 和内容区拉开层级：侧栏压在上面一点 */
+  box-shadow: 1px 0 0 var(--kal-border), 4px 0 16px rgba(0, 0, 0, 0.04);
+  position: relative;
+  z-index: 2;
   transition: width 0.18s ease;
+}
+
+/* 菜单项：选中态左侧加一条标，层级一眼看出来 */
+.app-sidebar .ant-menu-item {
+  position: relative;
+}
+
+.app-sidebar .ant-menu-item-selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 18px;
+  border-radius: 0 3px 3px 0;
+  background: var(--ant-color-primary, #1677ff);
+}
+
+/* 折叠态标记贴左边缘 */
+.app-sidebar.collapsed .ant-menu-item-selected::before {
+  height: 22px;
 }
 
 /* 折叠态：图标居中，去掉左右留白 */
@@ -164,6 +190,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: flex-start;
+  /* 折叠时按钮宽度跟着侧栏收，文字淡出期间不换行 */
+  overflow: hidden;
 }
 
 /* 通用卡片网格。

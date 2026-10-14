@@ -44,7 +44,7 @@ function admin_order_settle(array $in): never
     }
     if (isset($in['settle_note'])) {
         $sets[] = 'settle_note = ?';
-        $args[] = mb_substr(trim((string) $in['settle_note']), 0, 255);
+        $args[] = clean_text($in['settle_note'], 255, '结算备注');
     }
     if (!$sets) fail('没有要改的');
     $args[] = now();
@@ -124,14 +124,22 @@ function action_settlement_add(): never
     $tx = trim((string) ($in['tx_hash'] ?? ''));
     if ($tx !== '' && !valid_tx_hash($network, $tx)) fail('交易哈希格式不对');
     $paidAt = preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/', (string) ($in['paid_at'] ?? '')) ? str_replace('T', ' ', substr((string) $in['paid_at'], 0, 16)) . ':00' : now();
+    // 备注必须是合法 UTF-8：不是的话 MySQL 会抛错变成 500，这里提前拦成能看懂的提示
+    $note = clean_text($in['note'] ?? '', 255, '备注');
     if ($tx === '' && empty($_FILES['proof']['name'])) fail('交易哈希和凭证至少给一个');
     [$file, $mime] = !empty($_FILES['proof']['name']) ? store_proof($_FILES['proof']) : ['', ''];
     $actor = !empty($_SERVER['HTTP_AUTHORIZATION']) ? 'desktop' : (string) ($_SESSION['admin'] ?? 'admin');
-    $pdo->prepare(
-        'INSERT INTO settlements (client_id, order_id, amount, token, network, to_address, tx_hash, proof_file, proof_mime, note, created_by, paid_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-    )->execute([$clientId, $orderId, round($amount, 2), $token, $network, $to, $tx, $file, $mime,
-        mb_substr(trim((string) ($in['note'] ?? '')), 0, 255), substr($actor, 0, 32), $paidAt, now()]);
+    try {
+        $pdo->prepare(
+            'INSERT INTO settlements (client_id, order_id, amount, token, network, to_address, tx_hash, proof_file, proof_mime, note, created_by, paid_at, created_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([$clientId, $orderId, round($amount, 2), $token, $network, $to, $tx, $file, $mime,
+            $note, substr($actor, 0, 32), $paidAt, now()]);
+    } catch (Throwable $e) {
+        // 入库失败就把刚写进去的凭证删掉，否则磁盘上会留下没人引用的孤儿文件
+        if ($file !== '') @unlink(proofs_dir() . '/' . $file);
+        throw $e;
+    }
     $id = (int) $pdo->lastInsertId();
     if ($orderId) recompute_order_settle($orderId);
     admin_log('settlement_add', ['id' => $id, 'client_id' => $clientId, 'order_id' => $orderId, 'amount' => round($amount, 2),

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons-vue'
+import { MenuFoldOutlined } from '@ant-design/icons-vue'
 import kiroLogo from '@/assets/kiro-logo.png'
 import ThemeModeIcon from '@/components/common/ThemeModeIcon.vue'
 import { useSettingsStore } from '@/stores/settings'
@@ -55,7 +55,7 @@ const collapsed = computed(() => settingsStore.settings.sidebarCollapsed)
           <template #icon>
             <ThemeModeIcon :mode="settingsStore.isDark ? 'light' : 'dark'" :size="16" class="theme-icon" />
           </template>
-          <span v-if="!collapsed">{{ darkModeLabel }}</span>
+          <span class="btn-text">{{ darkModeLabel }}</span>
         </a-button>
       </a-tooltip>
       <a-tooltip :title="collapsed ? '展开侧栏' : ''" placement="right">
@@ -64,11 +64,9 @@ const collapsed = computed(() => settingsStore.settings.sidebarCollapsed)
           class="footer-btn"
           @click="settingsStore.update({ sidebarCollapsed: !collapsed })"
         >
-          <template #icon>
-            <MenuUnfoldOutlined v-if="collapsed" />
-            <MenuFoldOutlined v-else />
-          </template>
-          <span v-if="!collapsed">收起侧栏</span>
+          <!-- 图标不换组件、只转 180°：换组件会在折叠动画里闪一下 -->
+          <template #icon><MenuFoldOutlined class="fold-icon" /></template>
+          <span class="btn-text">收起侧栏</span>
         </a-button>
       </a-tooltip>
     </div>
@@ -77,6 +75,28 @@ const collapsed = computed(() => settingsStore.settings.sidebarCollapsed)
 
 
 <style scoped>
+/* 折叠时文字收成 0 宽并淡出，不卸载 DOM：卸载会在宽度动画里闪一下 */
+.btn-text {
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 120px;
+  opacity: 1;
+  transition: max-width 0.18s ease, opacity 0.12s ease;
+}
+
+.app-sidebar.collapsed .btn-text {
+  max-width: 0;
+  opacity: 0;
+}
+
+.fold-icon {
+  transition: transform 0.18s ease;
+}
+
+.app-sidebar.collapsed .fold-icon {
+  transform: rotate(180deg);
+}
+
 .brand-logo-wrap {
   position: relative;
   width: 34px;

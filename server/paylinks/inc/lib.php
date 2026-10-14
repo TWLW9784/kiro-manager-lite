@@ -58,6 +58,46 @@ function json_out(array $data, int $status = 200): never
 }
 
 /**
+ * 文本入库前的清洗：先确认是合法 UTF-8，再去掉首尾空白并截断。
+ *
+ * 不校验的话，编码不对的字节（比如客户端误用 GBK）会让 MySQL 抛
+ * 「Incorrect string value」，接口直接变成 500，用户只看到「服务器错误」。
+ */
+function clean_text(mixed $v, int $max, string $label): string
+{
+    $s = trim((string) $v);
+    if ($s === '') return '';
+    if (!mb_check_encoding($s, 'UTF-8')) fail($label . '含有无法识别的字符，请重新输入');
+    // 去掉控制字符（制表和换行留着）
+    $s = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $s) ?? '';
+    return mb_substr($s, 0, $max);
+}
+
+/**
+ * 页面级安全响应头。index.php / manage.php 共用，避免两边写漏。
+ *
+ * script-src 不开 'unsafe-inline'：两个页面的登录脚本都放在 assets/ 下的独立文件里。
+ * style-src 必须留 'unsafe-inline'：Element Plus 靠行内 style 控制表格列宽、过渡等。
+ * cloudflareinsights 是 Cloudflare 回源时注入的统计脚本，不放行会一直报 CSP 违规。
+ */
+function page_headers(): void
+{
+    header('X-Content-Type-Options: nosniff');
+    header('X-Frame-Options: DENY');
+    header('Cache-Control: no-store');
+    header('Referrer-Policy: same-origin');
+    header('Permissions-Policy: geolocation=(), microphone=(), camera=(), payment=()');
+    header(
+        "Content-Security-Policy: default-src 'self'; "
+        . "script-src 'self' https://static.cloudflareinsights.com; "
+        . "style-src 'self' 'unsafe-inline'; "
+        . "img-src 'self' data:; font-src 'self' data:; "
+        . "connect-src 'self' https://cloudflareinsights.com; "
+        . "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    );
+}
+
+/**
  * 出错返回。code 是给网页翻译用的错误码（中 / 英 / 乌兹别克语），error 是中文原文，
  * 桌面端与日志直接看 error。
  */

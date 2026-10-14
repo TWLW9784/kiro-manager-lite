@@ -145,11 +145,11 @@ function admin_client_save(array $in): never
 
     $fields = [
         'username' => $username,
-        'display_name' => mb_substr(trim((string) ($in['display_name'] ?? '')), 0, 64),
+        'display_name' => clean_text($in['display_name'] ?? '', 64, '客户名称'),
         'enabled' => !empty($in['enabled']) ? 1 : 0,
         'max_claim' => max(1, min(500, (int) ($in['max_claim'] ?? 50))),
         'claim_timeout_minutes' => max(10, min(7 * 24 * 60, (int) ($in['claim_timeout_minutes'] ?? 1440))),
-        'note' => mb_substr(trim((string) ($in['note'] ?? '')), 0, 255),
+        'note' => clean_text($in['note'] ?? '', 255, '备注'),
         'unit_price' => unit_price_or_null($in['unit_price'] ?? null),
     ];
     // 收款地址：传了才改（不传保持原样）；格式按网络校验
@@ -433,7 +433,7 @@ function insert_order(int $clientId, string $tier, int $qty, int $limit, string 
         "INSERT INTO orders (code, client_id, tier, quantity, replace_limit, source, note, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
-    $note = mb_substr(trim($note), 0, 255);
+    $note = clean_text($note, 255, '备注');
     $source = $source === 'offline' ? 'offline' : 'site';
     for ($try = 0; ; $try++, $seq++) {
         $code = sprintf('%s%02d', $prefix, $seq);

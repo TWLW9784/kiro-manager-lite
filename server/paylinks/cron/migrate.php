@@ -31,7 +31,7 @@ $pdo->exec(
        display_name    VARCHAR(64)  NOT NULL DEFAULT '',
        enabled         TINYINT(1)   NOT NULL DEFAULT 1,
        max_claim       INT UNSIGNED NOT NULL DEFAULT 50,
-       claim_timeout_minutes INT UNSIGNED NOT NULL DEFAULT 180,
+       claim_timeout_minutes INT UNSIGNED NOT NULL DEFAULT 1440,
        session_version INT UNSIGNED NOT NULL DEFAULT 1,
        note            VARCHAR(255) NOT NULL DEFAULT '',
        last_login_at   DATETIME     NULL,
@@ -109,6 +109,17 @@ foreach ($orphans as $o) {
     );
     $moved->execute([$id, $o['client_id'], $o['tier']]);
     echo "history order $code: {$moved->rowCount()} links\n";
+}
+
+// 领取超时的列默认值：老库建表时是 180 分钟，策略已改成 24 小时。
+// 只改默认值，不动已有客户各自设定的值。
+$def = $pdo->query(
+    "SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'clients' AND COLUMN_NAME = 'claim_timeout_minutes'"
+)->fetchColumn();
+if ((int) $def !== 1440) {
+    $pdo->exec('ALTER TABLE clients MODIFY claim_timeout_minutes INT UNSIGNED NOT NULL DEFAULT 1440');
+    echo "clients.claim_timeout_minutes default {$def} -> 1440\n";
 }
 
 echo "migrate ok\n";

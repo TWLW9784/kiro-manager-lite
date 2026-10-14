@@ -1,0 +1,93 @@
+/* 侧栏 + 内容区布局：客户门户与网页后台共用。配色与控件交给 Element Plus */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body {
+  background: var(--el-bg-color-page);
+  color: var(--el-text-color-primary);
+  font-family: var(--el-font-family);
+}
+.muted { color: var(--el-text-color-secondary); }
+.small { font-size: 12px; }
+.ok { color: var(--el-color-success); }
+.warn { color: var(--el-color-warning); }
+.danger { color: var(--el-color-danger); }
+.primary { color: var(--el-color-primary); }
+.num { font-variant-numeric: tabular-nums; }
+.mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; word-break: break-all; }
+.right { text-align: right; }
+.nowrap { white-space: nowrap; }
+.grow { flex: 1 1 auto; }
+
+/* ---------- 布局 ---------- */
+.shell { display: grid; grid-template-columns: 232px 1fr; min-height: 100vh; }
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  background: var(--el-bg-color);
+  border-right: 1px solid var(--el-border-color-light);
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  z-index: 3;
+}
+.brand { display: flex; align-items: center; gap: 10px; padding: 16px 16px 12px; }
+.brand-mark {
+  width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none;
+  background: linear-gradient(135deg, var(--el-color-primary), #7c3aed); color: #fff; font-weight: 700;
+}
+.brand-text b { display: block; font-size: 15px; line-height: 1.3; }
+.brand-text span { font-size: 11px; color: var(--el-text-color-secondary); }
+/* 要比 .el-button 更具体：Element Plus 的样式是按需注入的，排在本文件之后 */
+.sidebar .nav-close { display: none; margin-left: auto; }
+.nav { flex: 1 1 auto; border-right: none; overflow-y: auto; }
+.nav .el-menu-item { height: 42px; line-height: 42px; }
+.nav-badge { margin-left: auto; }
+.sidebar-foot { padding: 12px; border-top: 1px solid var(--el-border-color-light); display: flex; flex-direction: column; gap: 10px; }
+.user { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.user-text { min-width: 0; }
+.user-text b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-text span { font-size: 11px; color: var(--el-text-color-secondary); }
+.foot-actions { display: flex; gap: 8px; }
+.foot-actions .lang { width: 96px; }
+
+.main { min-width: 0; display: flex; flex-direction: column; }
+.topbar {
+  display: flex; align-items: center; gap: 12px; padding: 12px 24px;
+  border-bottom: 1px solid var(--el-border-color-light); background: var(--el-bg-color);
+  position: sticky; top: 0; z-index: 2;
+}
+.topbar h1 { flex: 1 1 auto; margin: 0; font-size: 18px; font-weight: 600; }
+.topbar .nav-toggle { display: none; }
+.content { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; width: 100%; }
+
+/* ---------- 统计卡 ---------- */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+.stat-label { font-size: 12px; color: var(--el-text-color-secondary); }
+.stat-value { font-size: 24px; font-weight: 650; line-height: 1.25; font-variant-numeric: tabular-nums; }
+.stat-sub { font-size: 12px; color: var(--el-text-color-secondary); min-height: 18px; }
+.stat-value.ok { color: var(--el-color-success); }
+.stat-value.warn { color: var(--el-color-warning); }
+.stat-value.primary { color: var(--el-color-primary); }
+
+/* ---------- 卡片内的工具条 ---------- */
+.card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.card-head h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.pager { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* ---------- 手机 ---------- */
+@media (max-width: 900px) {
+  .shell { grid-template-columns: 1fr; }
+  .sidebar {
+    position: fixed; left: 0; top: 0; bottom: 0; width: 260px; height: 100vh;
+    transform: translateX(-100%); transition: transform 0.2s ease; z-index: 2001;
+  }
+  .shell.nav-open .sidebar { transform: none; box-shadow: var(--el-box-shadow-dark); }
+  .nav-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 2000; }
+  .sidebar .nav-close, .topbar .nav-toggle { display: inline-flex; }
+  .topbar { padding: 10px 14px; }
+  .content { padding: 14px 12px 32px; gap: 12px; }
+  .stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .stat-value { font-size: 20px; }
+  .toolbar > * { flex: 1 1 auto; }
+}
