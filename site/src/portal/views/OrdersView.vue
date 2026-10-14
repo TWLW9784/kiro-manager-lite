@@ -145,7 +145,7 @@ const refilter = (): void => {
         <template #default><el-button size="small" text type="primary">{{ tt('details') }}</el-button></template>
       </el-table-column>
       <template #empty>
-        <el-empty :description="`${tt('no_orders')}｜${tt('no_orders_tip')}`" />
+        <el-empty :image-size="72" :description="`${tt('no_orders')}｜${tt('no_orders_tip')}`" />
       </template>
     </el-table>
 

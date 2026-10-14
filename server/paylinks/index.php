@@ -5,7 +5,7 @@ require __DIR__ . '/inc/lib.php';
 page_headers();
 $authed = logged_in();
 $csrf = $authed ? csrf_token() : '';
-$v = '35';
+$v = '40';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>
@@ -24,15 +24,17 @@ $v = '35';
 </head>
 <body>
 <?php if (!$authed): ?>
+<!-- 语言切换放右上角，和登录后的门户位置一致。按钮由 i18n.js 生成 -->
+<div id="lang" class="auth-lang" role="group" aria-label="Language"></div>
 <main class="auth">
   <form id="login" class="card auth-card" autocomplete="on">
     <div class="brand"><div class="brand-mark">P</div><div><b data-i18n="title">支付链接</b><span data-i18n="portal_sub">客户门户</span></div></div>
     <p class="text-2" style="margin:0" data-i18n="login_hint">请使用管理员给你的账号登录</p>
-    <label class="field"><span data-i18n="username">账号</span><input name="username" autocomplete="username" required></label>
+    <label class="field"><span data-i18n="username">账号</span><input type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label class="field"><span data-i18n="password">密码</span><input name="password" type="password" autocomplete="current-password" required></label>
     <button type="submit" class="btn primary block" data-i18n="login">登录</button>
     <p id="login-error" class="error" role="alert"></p>
-    <div class="auth-foot"><span class="muted small">© Payment links</span><select id="lang" aria-label="Language" style="width:auto"></select></div>
+    <div class="auth-foot"><span class="muted small">© Payment links</span></div>
   </form>
 </main>
 <script src="assets/login.js?v=<?= $v ?>"></script>

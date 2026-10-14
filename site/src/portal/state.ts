@@ -38,8 +38,26 @@ export interface Me {
 
 export const me = ref<Me | null>(null)
 
+/** 使用说明弹窗：顶栏按钮和工作台的新手提示都能打开 */
+export const helpOpen = ref(false)
+
+/**
+ * 新手提示是否已关闭。按账号记在本机：同一台电脑换个客户账号登录，
+ * 新账号还能看到。
+ */
+const guideKey = (): string => `pl.guide.${me.value?.client.username ?? ''}`
+export const guideDismissed = ref(false)
+export function syncGuide(): void {
+  guideDismissed.value = !!me.value && localStorage.getItem(guideKey()) === '1'
+}
+export function dismissGuide(): void {
+  localStorage.setItem(guideKey(), '1')
+  guideDismissed.value = true
+}
+
 export async function loadMe(): Promise<void> {
   me.value = await api.get<Me>('me')
+  syncGuide()
 }
 
 /** 领取规则说明：N 小时 / N 天 */

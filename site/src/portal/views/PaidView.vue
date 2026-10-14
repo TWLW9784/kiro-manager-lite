@@ -116,7 +116,7 @@ const csvUrl = (): string =>
           <PaylinkUrl :url="row.url" :tip="tt('click_copy')" :copied="tt('copied', { n: 1 })" />
         </template>
       </el-table-column>
-      <template #empty><el-empty :description="tt('no_paid')" /></template>
+      <template #empty><el-empty :image-size="72" :description="tt('no_paid')" /></template>
     </el-table>
 
     <div v-if="total > size" class="pager">

@@ -608,22 +608,38 @@ function applyI18n() {
   for (const el of document.querySelectorAll('[data-i18n]')) el.textContent = t(el.dataset.i18n)
   for (const el of document.querySelectorAll('[data-i18n-ph]')) el.placeholder = t(el.dataset.i18nPh)
   for (const el of document.querySelectorAll('[data-i18n-label]')) el.setAttribute('aria-label', t(el.dataset.i18nLabel))
-  const select = document.getElementById('lang')
-  if (select) select.value = LANG
+  for (const b of document.querySelectorAll('#lang button')) {
+    const on = b.dataset.lang === LANG
+    b.classList.toggle('active', on)
+    b.setAttribute('aria-pressed', on ? 'true' : 'false')
+  }
 }
 
-/** 语言下拉：换了就重新套文案，并通知页面脚本重渲染动态内容 */
+/** 按钮上的短名，和登录后门户右上角的一致 */
+const LANG_SHORT = { zh: '中文', en: 'EN', uz: 'UZ' }
+
+/**
+ * 右上角的语言按钮（三种语言，分段按钮比下拉直观：点一下就切，
+ * 看不懂当前语言的人也能认出 EN / UZ）。换了就重新套文案，并通知页面脚本。
+ */
 function mountLangSwitch() {
-  const select = document.getElementById('lang')
-  if (!select) return
-  select.innerHTML = LANGS.map((l) => `<option value="${l.code}">${l.label}</option>`).join('')
-  select.value = LANG
-  select.addEventListener('change', () => {
-    LANG = select.value
-    localStorage.setItem('pl.lang', LANG)
-    applyI18n()
-    document.dispatchEvent(new CustomEvent('langchange'))
-  })
+  const box = document.getElementById('lang')
+  if (!box) return
+  for (const l of LANGS) {
+    const b = document.createElement('button')
+    b.type = 'button'
+    b.dataset.lang = l.code
+    b.title = l.label
+    b.textContent = LANG_SHORT[l.code] || l.label
+    b.addEventListener('click', () => {
+      if (LANG === l.code) return
+      LANG = l.code
+      localStorage.setItem('pl.lang', LANG)
+      applyI18n()
+      document.dispatchEvent(new CustomEvent('langchange'))
+    })
+    box.appendChild(b)
+  }
   applyI18n()
 }
 

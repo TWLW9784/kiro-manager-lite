@@ -56,7 +56,11 @@ body {
   border-bottom: 1px solid var(--el-border-color-light); background: var(--el-bg-color);
   position: sticky; top: 0; z-index: 2;
 }
-.topbar h1 { flex: 1 1 auto; margin: 0; font-size: 18px; font-weight: 600; }
+/* min-width:0 + 省略号：标题长了（比如乌兹别克语）就截断，不把右上角的按钮挤出屏幕 */
+.topbar h1 {
+  flex: 1 1 auto; min-width: 0; margin: 0; font-size: 18px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .topbar .nav-toggle { display: none; }
 .content { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; width: 100%; }
 
@@ -133,4 +137,11 @@ body {
      scoped 样式排在本文件之后，同级选择器在这里写了也会被盖掉 */
   /* 复选框本体只有 14×14，把可点区域撑满单元格（负 margin 抵消占位） */
   .el-table .el-checkbox { padding: 11px; margin: -11px; }
+}
+
+/* 小屏手机统计卡固定两列；卡片数为奇数时最后一张占满整行，
+   不然门户的「我的收益」会单独缩在左半边 */
+@media (max-width: 480px) {
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
 }

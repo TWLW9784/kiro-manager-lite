@@ -164,7 +164,9 @@ h3 { font-size: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field > span { font-size: 12px; font-weight: 500; color: var(--text-2); }
 .field .hint { font-size: 12px; color: var(--muted); }
-.input, .select, .textarea, input[type="text"], input[type="password"], input[type="number"], input[type="date"],
+/* input:not([type]) 不能省：没写 type 的输入框默认是文本框，但 [type="text"] 匹配不到它，
+   登录页的账号框就是这样掉回浏览器原生样式的 */
+.input, .select, .textarea, input:not([type]), input[type="text"], input[type="password"], input[type="number"], input[type="date"],
 input[type="datetime-local"], input[type="search"], select, textarea {
   height: 34px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface);
   color: var(--text); font: inherit; width: 100%; min-width: 0;
@@ -270,10 +272,25 @@ table.table { width: 100%; border-collapse: collapse; }
 .toast { animation-name: fade; }
 
 /* ============ 登录页 ============ */
-.auth { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+/* 顶部多留 64px：右上角的语言按钮是 fixed 的，横屏矮手机上卡片会顶到最上面，不留就会叠在一起 */
+.auth { min-height: 100vh; display: grid; place-items: center; padding: 64px 24px 24px; }
 .auth-card { width: min(400px, 100%); padding: 28px; display: flex; flex-direction: column; gap: 16px; }
 .auth-card .brand { padding: 0; }
 .auth-foot { display: flex; justify-content: space-between; align-items: center; }
+/* 登录页右上角的语言切换：和登录后门户顶栏的分段按钮同一个样子 */
+.auth-lang {
+  position: fixed; top: 14px; right: 14px; z-index: 10;
+  display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm);
+  background: var(--surface); overflow: hidden; box-shadow: var(--shadow);
+}
+.auth-lang button {
+  appearance: none; border: 0; background: transparent; color: var(--text-2);
+  font: inherit; font-size: 13px; min-width: 44px; height: 32px; padding: 0 12px; cursor: pointer;
+}
+.auth-lang button + button { border-left: 1px solid var(--border); }
+.auth-lang button:hover { color: var(--primary); }
+.auth-lang button.active { background: var(--primary); color: #fff; }
+.auth-lang button:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
 .error { color: var(--danger); font-size: 13px; min-height: 18px; margin: 0; }
 
 /* ============ 手机 ============ */

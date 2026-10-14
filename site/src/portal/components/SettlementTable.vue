@@ -91,6 +91,6 @@ const compact = computed(() => vw.value <= 860)
     <el-table-column v-if="!compact" :label="tt('col_note')" min-width="120">
       <template #default="{ row }"><span class="small">{{ row.note }}</span></template>
     </el-table-column>
-    <template #empty><el-empty :description="empty" /></template>
+    <template #empty><el-empty :image-size="72" :description="empty" /></template>
   </el-table>
 </template>

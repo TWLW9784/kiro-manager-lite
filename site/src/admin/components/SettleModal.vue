@@ -5,7 +5,7 @@ import { ElMessage, type FormInstance, type FormRules, type UploadFile, type Upl
 import { Paperclip } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
 import { networkName, num, usd, validAddress, validTxHash, walletFresh } from '@site/shared/format'
-import { dialogWidth, useViewport } from '@site/shared/responsive'
+import { dialogTop, dialogWidth, useViewport } from '@site/shared/responsive'
 import { clients, loadClients, type AdminClient, type AdminOrder } from '../state'
 
 const props = defineProps<{ order?: AdminOrder | null; clientId?: number | '' }>()
@@ -13,6 +13,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 
 const { width: vw } = useViewport()
 const boxWidth = computed(() => dialogWidth(vw.value, 640))
+const boxTop = computed(() => dialogTop(vw.value))
 
 const TOKENS = ['USDT', 'USDC']
 const formRef = ref<FormInstance>()
@@ -125,7 +126,7 @@ async function submit(): Promise<void> {
   <el-dialog
     :model-value="true"
     :title="props.order ? `记一笔打款 · ${props.order.code}` : '记一笔打款'"
-    :width="boxWidth"
+    :width="boxWidth" :top="boxTop"
     append-to-body
     @close="emit('close')"
   >

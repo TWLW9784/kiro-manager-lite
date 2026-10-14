@@ -8,8 +8,9 @@ import { api, guard } from '@site/shared/api'
 import { copyText, cny, num, usd } from '@site/shared/format'
 import { useViewport } from '@site/shared/responsive'
 import { tt, t, lang } from '../i18n'
-import { claimRule, loadMe, me, walletIssue } from '../state'
+import { claimRule, guideDismissed, loadMe, me, walletIssue } from '../state'
 import OrderDrawer from '../components/OrderDrawer.vue'
+import QuickStart from '../components/QuickStart.vue'
 
 const emit = defineEmits<{ goto: [view: 'wallet'] }>()
 
@@ -77,6 +78,15 @@ function toggleAll(v: boolean): void {
 }
 
 const stats = computed(() => me.value?.stats)
+// 新手提示只给还没付过款的客户看：老客户早就会用了，再弹出来是打扰
+const showGuide = computed(() => !!stats.value && !guideDismissed.value && stats.value.paid === 0)
+// 新客户还没有任何动静时不显示统计卡：五张 0 什么也说明不了，反而把
+// 「管理员派单后会出现在这里」挤到屏幕下面。一有数据（领了、付了、结了）就出现
+const hasActivity = computed(() => {
+  const s = stats.value
+  if (!s) return false
+  return !!(s.claimed || s.checking || s.paid || num(s.due) || num(s.settled) || num(s.prepaid))
+})
 const claimable = computed(() => openOrders.value.filter((o) => num(o.remaining) > 0))
 const maxClaim = computed(() => me.value?.max_claim ?? 50)
 
@@ -208,6 +218,8 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
 </script>
 
 <template>
+  <QuickStart v-if="showGuide" />
+
   <el-alert
     v-if="walletIssue === 'missing'"
     type="warning"
@@ -229,7 +241,7 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
     <el-button size="small" type="primary" @click="emit('goto', 'wallet')">{{ tt('wallet_edit') }}</el-button>
   </el-alert>
 
-  <div v-if="stats" class="stats">
+  <div v-if="stats && hasActivity" class="stats">
     <el-card shadow="never" body-class="stat-body">
       <div class="stat-label">{{ tt('stat_pending') }}</div>
       <div class="stat-value warn">{{ stats.claimed + stats.checking }}</div>
@@ -313,7 +325,9 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
       </div>
     </template>
 
-    <div class="toolbar">
+    <!-- 一条待付都没有时不显示筛选和批量按钮：全是灰掉点不了的，只会让人困惑。
+         正在按批次筛选时保留，好让人切回「全部批次」 -->
+    <div v-if="total || orderFilter !== ALL" class="toolbar">
       <el-select v-model="orderFilter" class="w-200" @change="(page = 1), load()">
         <el-option :value="ALL" :label="tt('all_orders')" />
         <el-option
@@ -355,7 +369,11 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
             <span class="num grow right">{{ usd(row.amount_due) }}</span>
           </div>
           <div class="card-foot">
-            <el-tag v-if="row.status === 'checking'" type="warning" size="small">{{ tt('link_checking') }}</el-tag>
+            <template v-if="row.status === 'checking'">
+              <el-tag type="warning" size="small">{{ tt('link_checking') }}</el-tag>
+              <!-- 手机上没有悬停提示，这句直接写出来，免得客户以为没付上又付一次 -->
+              <span class="small muted">{{ tt('checking_hint') }}</span>
+            </template>
             <span v-else :class="['small', row.expires_in < 3600 ? 'warn' : 'muted']">{{ left(row.expires_in) }}</span>
             <span class="grow"></span>
             <el-button
@@ -366,14 +384,25 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
             >
               {{ tt('replace') }}
             </el-button>
-            <el-button size="small" type="primary" plain tag="a" :href="row.url" target="_blank" rel="noopener noreferrer">
-              {{ tt('open_pay') }}
+            <!-- 确认中的链接已经付不了了，按钮不能再写「打开付款」 -->
+            <el-button
+              size="small"
+              :type="row.status === 'checking' ? 'default' : 'primary'"
+              plain
+              tag="a"
+              :href="row.url"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              {{ row.status === 'checking' ? tt('view_link') : tt('open_pay') }}
             </el-button>
           </div>
         </article>
       </el-checkbox-group>
+      <!-- 默认插图 160px，在手机上比内容还大；缩小些，重点是那句提示 -->
       <el-empty
         v-if="!rows.length && !loading"
+        :image-size="72"
         :description="claimable.length ? tt('no_claimed_claim_tip') : tt('no_claimed')"
       />
     </div>
@@ -408,16 +437,28 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
           <div v-if="num(row.amount_cny)" class="muted small">{{ cny(row.amount_cny) }}</div>
         </template>
       </el-table-column>
-      <el-table-column :label="tt('col_left')" width="130">
+      <el-table-column :label="tt('col_left')" width="150">
         <template #default="{ row }">
-          <el-tag v-if="row.status === 'checking'" type="warning" size="small">{{ tt('link_checking') }}</el-tag>
+          <template v-if="row.status === 'checking'">
+            <el-tag type="warning" size="small">{{ tt('link_checking') }}</el-tag>
+            <div class="small muted">{{ tt('checking_hint') }}</div>
+          </template>
           <span v-else :class="['small', row.expires_in < 3600 ? 'warn' : 'muted']">{{ left(row.expires_in) }}</span>
         </template>
       </el-table-column>
       <el-table-column width="190" align="right">
         <template #default="{ row }">
-          <el-button size="small" type="primary" plain tag="a" :href="row.url" target="_blank" rel="noopener noreferrer">
-            {{ tt('open_pay') }}
+          <!-- 确认中的链接已经付不了了，按钮不能再写「打开付款」 -->
+          <el-button
+            size="small"
+            :type="row.status === 'checking' ? 'default' : 'primary'"
+            plain
+            tag="a"
+            :href="row.url"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            {{ row.status === 'checking' ? tt('view_link') : tt('open_pay') }}
           </el-button>
           <el-button
             v-if="row.status === 'claimed' && row.order_id && row.source !== 'offline'"
@@ -430,7 +471,7 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
         </template>
       </el-table-column>
       <template #empty>
-        <el-empty :description="claimable.length ? tt('no_claimed_claim_tip') : tt('no_claimed')" />
+        <el-empty :image-size="72" :description="claimable.length ? tt('no_claimed_claim_tip') : tt('no_claimed')" />
       </template>
     </el-table>
 
@@ -467,7 +508,14 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
 /* ---- 手机卡片列表 ---- */
 .link-cards { display: flex; flex-direction: column; gap: 10px; }
 .pick-all { margin: 2px 0 0; }
-.card-group { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+/* el-checkbox-group 自带 font-size:0; line-height:0（用来去掉行内复选框之间的空隙），
+   会一路继承进卡片：没单独设字号的文字（比如金额）字号变 0 直接看不见，
+   设了字号的文字行高也是 0，一换行就叠在一起。这里的子元素是纵向排的卡片，
+   用不着那个技巧，恢复正常字号和行高 */
+.card-group {
+  display: flex; flex-direction: column; gap: 10px; width: 100%;
+  font-size: var(--el-font-size-base); line-height: 1.5;
+}
 .link-card {
   border: 1px solid var(--el-border-color-light);
   border-radius: var(--el-border-radius-base);
@@ -481,6 +529,8 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
 .card-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .card-top :deep(.paylink) { flex: 1 1 auto; min-width: 0; }
 .card-meta, .card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 金额是客户在卡片上最先要看的，稍微加重 */
+.card-meta .num { font-weight: 600; }
 /* 手机上要点得准：size="small" 默认只有 24px 高 */
 .card-foot :deep(.el-button--small) { height: 34px; padding: 8px 12px; }
 .card-top :deep(.el-checkbox) { padding: 8px; margin: -8px; }

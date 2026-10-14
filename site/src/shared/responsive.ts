@@ -48,3 +48,11 @@ export function dialogWidth(vw: number, preferred: number): string {
   if (vw < preferred + 48) return 'calc(100vw - 24px)'
   return preferred + 'px'
 }
+
+/**
+ * 弹窗离顶部的距离。Element Plus 默认 15vh，手机上白白空出 120 多像素，
+ * 长一点的弹窗（使用说明、记一笔打款）底部按钮就被挤到屏幕外了。
+ */
+export function dialogTop(vw: number): string {
+  return vw <= 640 ? '12px' : '8vh'
+}

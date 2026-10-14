@@ -6,7 +6,7 @@ page_headers();
 $authed = admin_session_ok();
 $csrf = $authed ? ($_SESSION['admin_csrf'] ?? '') : '';
 $admin = (string) ($_SESSION['admin'] ?? 'admin');
-$v = '35';
+$v = '40';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>
@@ -27,7 +27,7 @@ $v = '35';
 <main class="auth">
   <form id="login" class="card auth-card">
     <div class="brand"><div class="brand-mark">P</div><div><b>管理后台</b><span>Payment links</span></div></div>
-    <label class="field"><span>账号</span><input name="username" autocomplete="username" required></label>
+    <label class="field"><span>账号</span><input type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" required></label>
     <label class="field"><span>密码</span><input name="password" type="password" autocomplete="current-password" required></label>
     <button type="submit" class="btn primary block">登录</button>
     <p id="login-error" class="error" role="alert"></p>

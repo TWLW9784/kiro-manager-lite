@@ -112,7 +112,7 @@ async function copyAddr(): Promise<void> {
         </el-descriptions-item>
         <el-descriptions-item :label="tt('wallet_updated')">{{ me.client.wallet_updated_at ?? '-' }}</el-descriptions-item>
       </el-descriptions>
-      <el-empty v-else :description="`${tt('wallet_missing')}｜${tt('wallet_missing_tip')}`" />
+      <el-empty :image-size="72" v-else :description="`${tt('wallet_missing')}｜${tt('wallet_missing_tip')}`" />
       <el-alert type="warning" :closable="false" show-icon class="note" :title="tt('wallet_warning')" />
     </el-card>
   </div>

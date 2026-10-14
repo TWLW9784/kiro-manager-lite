@@ -1,10 +1,12 @@
 <script setup lang="ts">
 /** 客户门户：侧栏 + 内容区。付款工作台 / 我的批次 / 已付款 / 结算记录 / 收款设置 */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { Close, Expand, Lightning, Document, Select, Sort, Wallet } from '@element-plus/icons-vue'
+import { Close, Expand, Lightning, Document, QuestionFilled, Select, Sort, Wallet } from '@element-plus/icons-vue'
 import { guard } from '@site/shared/api'
-import { LANGS, setLang, lang, tt } from './i18n'
-import { loadMe, me } from './state'
+import { lang, tt } from './i18n'
+import { helpOpen, loadMe, me } from './state'
+import LangSwitch from './components/LangSwitch.vue'
+import HelpDialog from './components/HelpDialog.vue'
 import WorkView from './views/WorkView.vue'
 import OrdersView from './views/OrdersView.vue'
 import PaidView from './views/PaidView.vue'
@@ -101,12 +103,8 @@ const initial = computed(() => (me.value?.client.display_name || me.value?.clien
             <span>{{ me ? tt('updated_at', { time: me.now.slice(11, 16) }) : '' }}</span>
           </div>
         </div>
-        <div class="foot-actions">
-          <el-select :model-value="lang" size="small" class="lang" @change="setLang">
-            <el-option v-for="l in LANGS" :key="l.code" :value="l.code" :label="l.label" />
-          </el-select>
-          <el-button size="small" @click="logout">{{ tt('logout') }}</el-button>
-        </div>
+        <!-- 语言切换挪到了右上角：手机上侧栏是收起的，放这里要先打开菜单才找得到 -->
+        <el-button size="small" class="logout" @click="logout">{{ tt('logout') }}</el-button>
       </div>
     </aside>
 
@@ -114,7 +112,13 @@ const initial = computed(() => (me.value?.client.display_name || me.value?.clien
       <header class="topbar">
         <el-button class="nav-toggle" text :icon="Expand" :aria-label="tt('open_menu')" @click="navOpen = true" />
         <h1>{{ tt(`nav_${view}`) }}</h1>
-        <span class="muted small">{{ tt('auto_refresh_s') }}</span>
+        <div class="topbar-actions">
+          <span class="muted small hide-sm">{{ tt('auto_refresh_s') }}</span>
+          <el-button text type="primary" :icon="QuestionFilled" :aria-label="tt('help')" class="help-btn" @click="helpOpen = true">
+            <span class="hide-sm">{{ tt('help') }}</span>
+          </el-button>
+          <LangSwitch />
+        </div>
       </header>
       <main class="content">
         <WorkView v-if="view === 'work'" :key="`w${reloadKey}`" @goto="go" />
@@ -124,5 +128,37 @@ const initial = computed(() => (me.value?.client.display_name || me.value?.clien
         <WalletView v-else />
       </main>
     </div>
+    <HelpDialog @goto="go" />
   </div>
 </template>
+
+<style scoped>
+/* 右上角：自动刷新提示 · 使用说明 · 语言 */
+.topbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.help-btn {
+  padding: 6px 8px;
+}
+/* 使用说明是新手找教程的入口，图标稍大一点，手机上只剩图标时也看得见 */
+.help-btn :deep(.el-icon) {
+  font-size: 18px;
+}
+.logout {
+  align-self: flex-start;
+}
+/* 手机顶栏放不下文字：只留问号图标和语言按钮。
+   选择器带 .topbar 是为了压过 Element Plus 自己给按钮里 span 设的样式 */
+@media (max-width: 640px) {
+  .topbar .hide-sm {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 4px;
+  }
+}
+</style>

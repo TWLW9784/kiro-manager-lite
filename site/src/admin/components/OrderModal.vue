@@ -3,7 +3,7 @@
 import { computed, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { api, guard } from '@site/shared/api'
-import { dialogWidth, useViewport } from '@site/shared/responsive'
+import { dialogTop, dialogWidth, useViewport } from '@site/shared/responsive'
 import { clients } from '../state'
 
 const props = defineProps<{ clientId?: number }>()
@@ -11,6 +11,7 @@ const emit = defineEmits<{ close: []; saved: [] }>()
 
 const { width: vw } = useViewport()
 const boxWidth = computed(() => dialogWidth(vw.value, 560))
+const boxTop = computed(() => dialogTop(vw.value))
 
 const TIERS = ['pro', 'pro+', 'promax', 'power']
 const formRef = ref<FormInstance>()
@@ -53,7 +54,7 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog :model-value="true" title="派单" :width="boxWidth" append-to-body @close="emit('close')">
+  <el-dialog :model-value="true" title="派单" :width="boxWidth" :top="boxTop" append-to-body @close="emit('close')">
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <el-form-item label="客户" prop="client_id">
         <el-select v-model="form.client_id" placeholder="选择客户">
