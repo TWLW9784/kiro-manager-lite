@@ -53,6 +53,7 @@ $('logout').addEventListener('click', async () => {
 
 // ============ 总览 ============
 const STATUS = { available: '可领取', claimed: '已领待付', checking: '确认中', paid: '已付款', refresh: '待换新' }
+const LINK_STATUS = { ...STATUS, superseded: '已作废' }
 loaders.overview = async () => {
   const o = await adm('overview')
   const tot = {}
@@ -134,15 +135,17 @@ loaders.orders = async () => {
     <div class="list">${orders.map((o) => {
       const pct = Math.round((num(o.paid) / Math.max(1, o.quantity)) * 100)
       return `<div class="item">
-        <div class="item-head"><b>${esc(o.code)}</b><span class="pill ${o.status}">${{ open: '进行中', done: '已完成', cancelled: '已取消' }[o.status]}</span>
+        <div class="item-head"><button class="link-btn" data-links="${o.id}"><b>${esc(o.code)}</b></button><span class="pill ${o.status}">${{ open: '进行中', done: '已完成', cancelled: '已取消' }[o.status]}</span>
+          ${o.source === 'offline' ? '<span class="pill" title="线下（TXT / Excel）发出后补建：链接早就在客户手里，不从池子领、不自动补">线下发出</span>' : ''}
           <span>${esc(o.client || '-')}</span><span class="pill">${esc(o.tier)} × ${o.quantity}</span><span class="spacer"></span>
           <span class="small muted">${short(o.created_at)}</span></div>
         <div class="bar"><span style="width:${pct}%"></span></div>
-        <div class="small">已付 <b class="ok">${num(o.paid)}</b> / ${o.quantity} · 待付 ${num(o.holding)} · 更换 ${o.replaced}/${o.replace_limit}
+        <div class="small">已付 <b class="ok">${num(o.paid)}</b> / ${o.quantity} · 待付 ${num(o.holding)}${num(o.void) ? ` · 已作废 ${num(o.void)}` : ''}${o.source === 'offline' ? '' : ` · 可领 ${Math.max(0, o.quantity - num(o.paid) - num(o.holding))} · 更换 ${o.replaced}/${o.replace_limit}`}
           · ${money(o.paid_usd, '$')} · ${money(o.paid_cny, '¥')}${o.note ? ` · ${esc(o.note)}` : ''}</div>
         <div class="row-actions">
           <button class="btn small-btn" data-links="${o.id}">查看链接</button>
-          ${o.status === 'open' ? `<button class="btn small-btn" data-qty="${o.id}" data-cur="${o.quantity}" data-min="${num(o.paid) + num(o.holding)}">改数量</button>
+          ${o.status === 'open' ? `<button class="btn small-btn" data-done="${o.id}" data-code="${esc(o.code)}" data-holding="${num(o.holding)}">标记完成</button>
+          <button class="btn small-btn" data-qty="${o.id}" data-cur="${o.quantity}" data-min="${num(o.paid) + num(o.holding)}">改数量</button>
           <button class="btn small-btn" data-limit="${o.id}" data-cur="${o.replace_limit}">改更换次数</button>
           <button class="btn small-btn danger" data-cancel="${o.id}" data-code="${esc(o.code)}">取消批次</button>` : ''}
         </div></div>`
@@ -164,7 +167,12 @@ $('tab-orders').addEventListener('submit', (e) => {
 $('tab-orders').addEventListener('click', (e) => {
   const b = e.target.closest('button')
   if (!b) return
-  if (b.dataset.links) return openLinks({ order_id: Number(b.dataset.links) })
+  if (b.dataset.links) return openLinks({ order_id: Number(b.dataset.links), include_void: 1 })
+  if (b.dataset.done) {
+    const tip = num(b.dataset.holding) ? `，客户手里还没付的 ${b.dataset.holding} 条照样留着可以付` : ''
+    if (!confirm(`把批次 ${b.dataset.code} 标记为完成？之后不能再领${tip}。`)) return
+    return guard(async () => { await adm('order_update', { id: Number(b.dataset.done), status: 'done' }); toast('已标记完成'); await loaders.orders() })
+  }
   if (b.dataset.qty) {
     const v = prompt(`批次数量（已付 + 待付 ${b.dataset.min} 条，不能少于这个数）`, b.dataset.cur)
     if (v === null) return
@@ -262,7 +270,7 @@ const linkFilter = { page: 1, page_size: 50 }
 
 // 从派单 / 客户页跳过来：带上筛选条件切到链接页
 function openLinks(filter) {
-  for (const k of ['client_id', 'order_id', 'statuses', 'tier', 'q', 'from', 'to']) delete linkFilter[k]
+  for (const k of ['client_id', 'order_id', 'include_void', 'statuses', 'tier', 'q', 'from', 'to']) delete linkFilter[k]
   Object.assign(linkFilter, filter, { page: 1 })
   document.querySelector('.tab[data-tab="links"]').click()
 }
@@ -290,7 +298,7 @@ loaders.links = async () => {
     <div class="list">${r.links.map((l) => `<div class="item">
       <div class="item-head">
         ${['claimed', 'checking', 'available'].includes(l.status) ? `<input type="checkbox" class="sel" value="${l.id}" aria-label="选中">` : ''}
-        <span class="pill ${l.status}">${STATUS[l.status] ?? l.status}</span><span class="pill">${esc(l.tier)}</span>
+        <span class="pill ${l.status}">${LINK_STATUS[l.status] ?? l.status}</span><span class="pill">${esc(l.tier)}</span>
         <span>${money(l.amount_due, '$')} · ${money(l.amount_cny, '¥')}</span>
         <span class="muted small">${esc(l.client || '')}</span><span class="spacer"></span>
         <span class="small muted">${l.paid_at ? `付款 ${short(l.paid_at)}` : l.claimed_at ? `领取 ${short(l.claimed_at)}` : `提取 ${short(l.extracted_at)}`}</span>
@@ -316,7 +324,7 @@ $('tab-links').addEventListener('submit', (e) => {
   for (const k of Object.keys(linkFilter)) delete linkFilter[k]
   Object.assign(linkFilter, { page: 1, page_size: 50 })
   // 批次筛选只能从派单页带过来，表单里没有，筛选时保留
-  if (order) linkFilter.order_id = order
+  if (order) Object.assign(linkFilter, { order_id: order, include_void: 1 })
   if (f.get('client_id')) linkFilter.client_id = Number(f.get('client_id'))
   if (f.get('status')) linkFilter.statuses = [f.get('status')]
   for (const k of ['tier', 'from', 'to', 'q']) if (String(f.get(k)).trim()) linkFilter[k] = String(f.get(k)).trim()
@@ -346,7 +354,7 @@ $('tab-links').addEventListener('click', (e) => {
     if (!confirm(tip)) return
     return guard(async () => { await adm('link_resolve', { id: Number(b.dataset.id), result: b.dataset.resolve }); toast('已定性'); await loaders.links() })
   }
-  if (b.hasAttribute('data-clear-order')) { delete linkFilter.order_id; linkFilter.page = 1; return guard(loaders.links) }
+  if (b.hasAttribute('data-clear-order')) { delete linkFilter.order_id; delete linkFilter.include_void; linkFilter.page = 1; return guard(loaders.links) }
   if (b.hasAttribute('data-revoke-sel')) {
     const ids = [...document.querySelectorAll('#tab-links .sel:checked')].map((c) => Number(c.value))
     if (!ids.length) return toast('先勾选要收回的链接')
@@ -358,7 +366,8 @@ $('tab-links').addEventListener('click', (e) => {
 // ============ 日志 ============
 const OPS = {
   client_save: '保存客户', client_delete: '删除客户', client_kick: '强制下线', link_revoke: '收回链接',
-  link_resolve: '手动定性', order_create: '派单', order_update: '修改批次', backfill_paid: '补记已付'
+  link_resolve: '手动定性', order_create: '派单', order_update: '修改批次', backfill_paid: '补记已付',
+  assign_links: '分配链接', assign_client1: '归属客户', assign_client2: '归属客户', fix_batches: '修正批次'
 }
 loaders.logs = async () => {
   const { logs } = await adm('logs', { page_size: 200 })

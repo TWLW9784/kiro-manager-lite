@@ -28,7 +28,7 @@ export interface AdminLink {
   tier: string
   amount_due: string | null
   amount_cny: string | null
-  status: 'available' | 'claimed' | 'checking' | 'paid' | 'refresh'
+  status: 'available' | 'claimed' | 'checking' | 'paid' | 'refresh' | 'superseded'
   client_id: number | null
   client: string | null
   claimed_at: string | null
@@ -64,7 +64,8 @@ export const LINK_STATUS_META: Record<AdminLink['status'], { text: string; color
   claimed: { text: '已领待付', color: 'orange' },
   checking: { text: '确认付款中', color: 'gold' },
   paid: { text: '已付款', color: 'green' },
-  refresh: { text: '待换新', color: 'default' }
+  refresh: { text: '待换新', color: 'default' },
+  superseded: { text: '已作废', color: 'default' }
 }
 
 export const REFRESH_REASON_TEXT: Record<string, string> = {
@@ -100,6 +101,9 @@ export const paylinksAdmin = {
     tier?: string
     from?: string
     to?: string
+    order_id?: number
+    /** 按批次看时连作废的旧链接一起列 */
+    include_void?: number
     page?: number
     page_size?: number
   }) => call<{ total: number; links: AdminLink[] }>({ op: 'links', ...filter }),
@@ -108,7 +112,7 @@ export const paylinksAdmin = {
     call<{ orders: AdminOrder[] }>({ op: 'orders', ...filter }).then((r) => r.orders),
   createOrder: (input: { client_id: number; tier: string; quantity: number; replace_limit?: number; note?: string }) =>
     call<{ id: number; code: string }>({ op: 'order_create', ...input }),
-  updateOrder: (input: { id: number; quantity?: number; replace_limit?: number; status?: 'cancelled' }) =>
+  updateOrder: (input: { id: number; quantity?: number; replace_limit?: number; status?: 'cancelled' | 'done' }) =>
     call({ op: 'order_update', ...input }),
   assignLinks: (input: { client_id: number; note?: string; links: AssignLinkInput[] }) =>
     call<{
@@ -143,11 +147,15 @@ export interface AdminOrder {
   replace_limit: number
   replaced: number
   status: 'open' | 'done' | 'cancelled'
+  /** site 网站派单；offline 线下（TXT / Excel）发出后补建，不从池子领 */
+  source: 'site' | 'offline'
   note: string
   created_at: string
   done_at: string | null
   paid: string | null
   holding: string | null
+  /** 作废的（换过新链接 / 放回换新） */
+  void: string | null
   paid_usd: string | null
   paid_cny: string | null
 }

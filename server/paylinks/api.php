@@ -16,6 +16,7 @@ try {
     $action = (string) ($_GET['action'] ?? '');
     match ($action) {
         'login' => action_login(),
+        'order_links' => action_order_links(),
         'logout' => action_logout(),
         'state' => action_state(),
         'claim' => action_claim(),

@@ -53,6 +53,30 @@ function orderCode(id) {
   return state.orders.find((o) => String(o.id) === String(id))?.code || '-'
 }
 
+// 点开的批次：id → 明细（每 3 秒刷新状态时一起重拉）
+const openOrders = new Map()
+
+async function loadOrderLinks(id) {
+  const r = await api(`order_links&order_id=${encodeURIComponent(id)}`)
+  openOrders.set(String(id), r.links)
+}
+
+function orderDetail(o) {
+  const rows = openOrders.get(String(o.id))
+  if (!rows) return `<div class="order-detail muted small">${t('loading')}</div>`
+  const unpaid = rows.filter((r) => r.status === 'claimed')
+  return `<div class="order-detail">
+    ${unpaid.length ? `<button class="btn small-btn" data-copy-order="${o.id}">${t('copy_unpaid', { n: unpaid.length })}</button>` : ''}
+    <div class="table-wrap"><table><tbody>${rows.map((r, i) => `<tr>
+      <td>${i + 1}</td>
+      <td><span class="tag ${r.status === 'paid' ? 'ok' : ''}">${t(`link_${r.status}`)}</span></td>
+      <td>${usd(r.amount_due)} <span class="muted small">${cny(r.amount_cny)}</span></td>
+      <td class="url">${r.url ? esc(r.url) : `<span class="muted small">${t('void_hint')}</span>`}</td>
+      <td class="small">${esc(String(r.paid_at || r.claimed_at || '').slice(5, 16))}</td>
+    </tr>`).join('')}</tbody></table></div>
+  </div>`
+}
+
 /** 我的批次：进行中的可以领；数量框默认填满剩余额度 */
 function renderOrders() {
   const orders = state.orders
@@ -68,12 +92,21 @@ function renderOrders() {
     const remaining = Number(o.remaining)
     const badge = open ? '' : `<span class="tag ${o.status === 'done' ? 'ok' : ''}">${t(o.status === 'done' ? 'order_done' : 'order_cancelled')}</span>`
     const pct = Math.min(100, Math.round((Number(o.paid) / Math.max(1, Number(o.quantity))) * 100))
+    const offline = o.source === 'offline'
+    const expanded = openOrders.has(String(o.id))
+    const progress = offline
+      ? t('order_progress_offline', { paid: Number(o.paid), qty: o.quantity, holding: Number(o.holding), void: Number(o.void || 0) })
+      : t('order_progress', { paid: Number(o.paid), qty: o.quantity, holding: Number(o.holding), remaining })
     return `<div class="order ${open ? '' : 'closed'}">
-      <div class="order-head"><b>${esc(o.code)}</b><span class="badge">${esc(o.tier)} × ${o.quantity}</span>${badge}</div>
+      <button class="order-head order-toggle" data-toggle-order="${o.id}" aria-expanded="${expanded}">
+        <b>${esc(o.code)}</b><span class="badge">${esc(o.tier)} × ${o.quantity}</span>${badge}
+        <span class="muted small">${o.note ? esc(o.note) : ''}</span><span class="spacer"></span>
+        <span class="small">${t(expanded ? 'hide_links' : 'view_links')}</span>
+      </button>
       <div class="bar"><span style="width:${pct}%"></span></div>
-      <div class="muted small">${t('order_progress', { paid: Number(o.paid), qty: o.quantity, holding: Number(o.holding), remaining })}
-        · ${t('order_replaced', { used: o.replaced, limit: o.replace_limit })}</div>
-      ${open && remaining > 0 ? `<div class="order-claim">
+      <div class="muted small">${progress}${offline ? '' : ` · ${t('order_replaced', { used: o.replaced, limit: o.replace_limit })}`}</div>
+      ${expanded ? orderDetail(o) : ''}
+      ${open && !offline && remaining > 0 ? `<div class="order-claim">
         <input type="number" min="1" max="${remaining}" value="${remaining}" data-count="${o.id}" aria-label="${esc(t('count'))}">
         <button class="btn primary" data-claim="${o.id}">${t('claim')}</button>
       </div>` : ''}
@@ -141,6 +174,8 @@ function render() {
 async function refresh() {
   try {
     state = await api('state')
+    // 点开着的批次跟着刷新状态
+    await Promise.all([...openOrders.keys()].map((id) => loadOrderLinks(id).catch(() => openOrders.delete(id))))
     render()
   } catch (e) {
     $('updated').textContent = t('refresh_failed', { msg: e.message })
@@ -150,7 +185,33 @@ async function refresh() {
 // ============ 交互 ============
 
 // 批次卡片里的「领取」：在该批次额度内领，数量框默认填满剩余额度
+// 点批次标题：展开 / 收起这个批次的全部链接
 $('orders').addEventListener('click', async (e) => {
+  const toggle = e.target.closest('[data-toggle-order]')
+  if (toggle) {
+    const id = toggle.dataset.toggleOrder
+    if (openOrders.has(id)) {
+      openOrders.delete(id)
+      return renderOrders()
+    }
+    openOrders.set(id, null)
+    renderOrders()
+    try {
+      await loadOrderLinks(id)
+    } catch (err) {
+      openOrders.delete(id)
+      toast(err.message)
+    }
+    return renderOrders()
+  }
+  const copyBtn = e.target.closest('[data-copy-order]')
+  if (copyBtn) {
+    const urls = (openOrders.get(copyBtn.dataset.copyOrder) || []).filter((r) => r.status === 'claimed').map((r) => r.url)
+    if (!urls.length) return
+    await copy(urls.join('\n'))
+    toast(t('copied', { n: urls.length }))
+    return
+  }
   const btn = e.target.closest('[data-claim]')
   if (!btn) return
   const orderId = Number(btn.dataset.claim)

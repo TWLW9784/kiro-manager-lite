@@ -177,7 +177,8 @@ function admin_client_kick(array $in): never
 /** 链接明细：按客户 / 状态 / 档位 / 付款日期筛选，按最近变动倒序，分页 */
 function admin_links(array $in): never
 {
-    $where = ["l.status <> 'superseded'"];
+    // 按批次看时连作废的（换过新链接的旧链接）一起列，批次里每一条都能对上
+    $where = !empty($in['order_id']) && !empty($in['include_void']) ? ['1 = 1'] : ["l.status <> 'superseded'"];
     $args = [];
     if (!empty($in['client_id'])) {
         $where[] = 'l.client_id = ?';
@@ -185,7 +186,7 @@ function admin_links(array $in): never
     }
     $statuses = array_values(array_intersect(
         (array) ($in['statuses'] ?? []),
-        ['available', 'claimed', 'checking', 'paid', 'refresh']
+        ['available', 'claimed', 'checking', 'paid', 'refresh', 'superseded']
     ));
     if ($statuses) {
         $where[] = 'l.status IN (' . implode(',', array_fill(0, count($statuses), '?')) . ')';
@@ -301,6 +302,7 @@ function admin_orders(array $in): never
     $stmt = db()->prepare(
         "SELECT o.*, COALESCE(c.display_name, c.username) AS client,
                 SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding,
+                SUM(l.status IN ('superseded', 'refresh')) AS void,
                 SUM(IF(l.status = 'paid', l.amount_due, 0)) AS paid_usd, SUM(IF(l.status = 'paid', l.amount_cny, 0)) AS paid_cny
          FROM orders o LEFT JOIN clients c ON c.id = o.client_id LEFT JOIN links l ON l.order_id = o.id
          WHERE $sql GROUP BY o.id ORDER BY o.status = 'open' DESC, o.id DESC LIMIT 200"
@@ -330,7 +332,7 @@ function admin_order_create(array $in): never
  * 建批次。批次号：B + 年月日 + 当天序号，按批次核对时好认。两人同时派单撞号时（uk_code）顺延重试
  * @return array{0:int,1:string} [id, code]
  */
-function insert_order(int $clientId, string $tier, int $qty, int $limit, string $note): array
+function insert_order(int $clientId, string $tier, int $qty, int $limit, string $note, string $source = 'site'): array
 {
     $pdo = db();
     $t = now();
@@ -339,14 +341,15 @@ function insert_order(int $clientId, string $tier, int $qty, int $limit, string 
     $last->execute([$prefix . '%']);
     $seq = (int) substr((string) $last->fetchColumn(), strlen($prefix)) + 1;
     $insert = $pdo->prepare(
-        "INSERT INTO orders (code, client_id, tier, quantity, replace_limit, note, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+        "INSERT INTO orders (code, client_id, tier, quantity, replace_limit, source, note, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     $note = mb_substr(trim($note), 0, 255);
+    $source = $source === 'offline' ? 'offline' : 'site';
     for ($try = 0; ; $try++, $seq++) {
         $code = sprintf('%s%02d', $prefix, $seq);
         try {
-            $insert->execute([$code, $clientId, $tier, $qty, $limit, $note, $t, $t]);
+            $insert->execute([$code, $clientId, $tier, $qty, $limit, $source, $note, $t, $t]);
             return [(int) $pdo->lastInsertId(), $code];
         } catch (PDOException $e) {
             if ($e->errorInfo[1] !== 1062 || $try >= 5) throw $e;
@@ -414,7 +417,8 @@ function admin_assign_links(array $in): never
         }
         $orders = [];
         foreach ($byTier as $tier => $items) {
-            [$orderId, $code] = insert_order($clientId, $tier, count($items), count($items), $note);
+            // 线下发出的：链接早就在客户手里，批次不从池子领
+            [$orderId, $code] = insert_order($clientId, $tier, count($items), count($items), $note, 'offline');
             $orders[] = ['code' => $code, 'tier' => $tier, 'quantity' => count($items)];
             foreach ($items as $it) {
                 $status = $it['paid'] ? 'paid' : 'claimed';
@@ -449,6 +453,12 @@ function admin_order_update(array $in): never
     $pdo = db();
     $id = (int) ($in['id'] ?? 0);
     $t = now();
+    // 手动完成：批次结束，不再能领；手里没付的照样留着可以付，已付的照常结算
+    if (($in['status'] ?? '') === 'done') {
+        $pdo->prepare("UPDATE orders SET status = 'done', done_at = COALESCE(done_at, ?), updated_at = ? WHERE id = ? AND status = 'open'")
+            ->execute([$t, $t, $id]);
+        json_out(['ok' => true]);
+    }
     if (($in['status'] ?? '') === 'cancelled') {
         $pdo->prepare("UPDATE orders SET status = 'cancelled', updated_at = ? WHERE id = ? AND status = 'open'")->execute([$t, $id]);
         $pdo->prepare(

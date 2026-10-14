@@ -82,14 +82,15 @@ function action_state(): never
 
     // 批次：进行中的全部 + 最近结束的 20 个，带各自的进度
     $orders = $pdo->query(
-        "SELECT o.id, o.code, o.tier, o.quantity, o.replace_limit, o.replaced, o.status, o.note, o.created_at, o.done_at,
-                SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding
+        "SELECT o.id, o.code, o.tier, o.quantity, o.replace_limit, o.replaced, o.status, o.source, o.note, o.created_at, o.done_at,
+                SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding,
+                SUM(l.status IN ('superseded', 'refresh')) AS void
          FROM orders o LEFT JOIN links l ON l.order_id = o.id
          WHERE o.client_id = $cid AND (o.status = 'open' OR o.updated_at >= DATE_SUB(NOW(), INTERVAL 30 DAY))
          GROUP BY o.id ORDER BY o.status = 'open' DESC, o.id DESC LIMIT 40"
     )->fetchAll();
     foreach ($orders as &$o) {
-        $o['remaining'] = max(0, (int) $o['quantity'] - (int) $o['paid'] - (int) $o['holding']);
+        $o['remaining'] = $o['source'] === 'offline' ? 0 : max(0, (int) $o['quantity'] - (int) $o['paid'] - (int) $o['holding']);
     }
     unset($o);
     $refreshing = $pdo->query("SELECT COUNT(*) FROM links WHERE status = 'refresh'")->fetchColumn();
@@ -127,6 +128,29 @@ function action_release(): never
     );
     $stmt->execute([$t, (int) $client['id']]);
     json_out(['ok' => true, 'released' => $stmt->rowCount()]);
+}
+
+/**
+ * 批次明细：这个批次里的每一条（待付 / 确认中 / 已付 / 已作废），点批次时看。
+ * 作废的（换过新链接、超时放回）不给链接本身，免得被误付。
+ */
+function action_order_links(): never
+{
+    $client = require_login();
+    $orderId = (int) ($_GET['order_id'] ?? body()['order_id'] ?? 0);
+    $pdo = db();
+    $order = $pdo->prepare('SELECT id, code, tier, quantity, status, source FROM orders WHERE id = ? AND client_id = ?');
+    $order->execute([$orderId, (int) $client['id']]);
+    $o = $order->fetch();
+    if (!$o) fail('批次不存在', 404, 'order_not_found');
+    $stmt = $pdo->prepare(
+        "SELECT id, IF(status IN ('superseded', 'refresh'), NULL, url) AS url, tier, amount_due, amount_cny,
+                IF(status IN ('superseded', 'refresh'), 'void', status) AS status, claimed_at, paid_at
+         FROM links WHERE order_id = ? AND client_id = ?
+         ORDER BY FIELD(IF(status IN ('superseded', 'refresh'), 'void', status), 'claimed', 'checking', 'paid', 'void'), id"
+    );
+    $stmt->execute([$orderId, (int) $client['id']]);
+    json_out(['ok' => true, 'order' => $o, 'links' => $stmt->fetchAll()]);
 }
 
 /** 导出已付款（结算对账）：CSV，可按日期范围 */

@@ -391,7 +391,8 @@ function order_stats(int $orderId): array
          FROM orders o WHERE o.id = $orderId"
     )->fetch();
     if (!$row) return [];
-    $row['remaining'] = max(0, (int) $row['quantity'] - (int) $row['paid'] - (int) $row['holding']);
+    // 线下批次的链接都是发好的，不能再从池子领
+    $row['remaining'] = $row['source'] === 'offline' ? 0 : max(0, (int) $row['quantity'] - (int) $row['paid'] - (int) $row['holding']);
     return $row;
 }
 

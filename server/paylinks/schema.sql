@@ -67,6 +67,8 @@ CREATE TABLE IF NOT EXISTS orders (
   replace_limit   INT UNSIGNED  NOT NULL DEFAULT 0,
   replaced        INT UNSIGNED  NOT NULL DEFAULT 0,
   status          VARCHAR(16)   NOT NULL DEFAULT 'open',
+  -- site 网站派单（客户在网站上领）；offline 线下（TXT / Excel）发出后补建，链接早已在客户手里，不从池子领
+  source          VARCHAR(16)   NOT NULL DEFAULT 'site',
   note            VARCHAR(255)  NOT NULL DEFAULT '',
   created_at      DATETIME      NOT NULL,
   done_at         DATETIME      NULL,

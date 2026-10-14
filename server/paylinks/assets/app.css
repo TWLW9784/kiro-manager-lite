@@ -157,3 +157,10 @@ tr.soon td.time { color: var(--danger); }
   tr td:first-child:has(input[type=checkbox]) { position: absolute; top: 8px; right: 8px; width: auto; }
   input[type=checkbox] { width: 20px; height: 20px; }
 }
+/* 批次标题可点：展开这个批次的全部链接 */
+.order-toggle { width: 100%; background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.order-toggle .spacer { flex: 1 1 auto; }
+.order-toggle:hover b, .order-toggle:focus-visible b { color: var(--primary); }
+.order-toggle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: 4px; }
+.order-detail { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.order-detail td.url { word-break: break-all; }

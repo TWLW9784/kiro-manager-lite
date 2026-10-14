@@ -126,7 +126,8 @@ function action_sync(): never
            SELECT order_id, SUM(status = 'paid') AS paid, SUM(status IN ('claimed', 'checking')) AS holding
            FROM links WHERE order_id IS NOT NULL GROUP BY order_id
          ) x ON x.order_id = o.id
-         WHERE o.status = 'open' GROUP BY o.tier"
+         -- 线下发出补建的批次（offline）链接早就在客户手里了，不从池子补
+         WHERE o.status = 'open' AND o.source = 'site' GROUP BY o.tier"
     )->fetchAll();
     $pool = [];
     foreach ($pdo->query("SELECT tier, COUNT(*) AS n FROM links WHERE status = 'available' GROUP BY tier") as $r) {

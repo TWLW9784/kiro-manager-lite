@@ -6,7 +6,7 @@ header('X-Frame-Options: DENY');
 header('Cache-Control: no-store');
 $authed = logged_in();
 $csrf = $authed ? csrf_token() : '';
-$v = '3';
+$v = '4';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>
