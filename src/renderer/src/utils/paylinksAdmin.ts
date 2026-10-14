@@ -24,9 +24,17 @@ export interface AdminClient {
   wallet_updated_at: string | null
   /** 已结（USD）= 批次已结金额 + 没挂批次的打款 */
   settled: number
-  /** 应结（USD）：批次设了单价按 已付条数 × 单价，否则按实付金额 */
+  /** 你要付给客户的（USD）：已付条数 × 单价；没设单价时按客户实付金额 */
   due: number
-  /** 未结 = 应结 − 已结 */
+  /** 客户实际在 Stripe 付掉的（USD） */
+  client_paid: number
+  /** 客户赚的 = 付客户 − 客户实付 */
+  client_profit: number
+  /** 余额 = 已付客户 − 应付客户：正数是你预付的，负数是还欠客户 */
+  balance: number
+  /** 预付（余额为正时的金额） */
+  prepaid: number
+  /** 待结算 = 应付客户 − 已付客户（只在欠客户时 > 0） */
   unsettled: number
   /** 新批次默认的每条结算单价；null = 按实付金额 */
   unit_price: string | null
@@ -59,7 +67,14 @@ export interface AdminOverview {
   last_stripe_check: string | null
   desktop: { at: string; version: string; last_summary: string; last_error: string } | null
   stuck_checking: number
-  settle: { due: number; settled: number; unsettled_orders: number; open_orders: number }
+  settle: {
+    due: number
+    client_paid: number
+    client_profit: number
+    settled: number
+    unsettled_orders: number
+    open_orders: number
+  }
 }
 
 export interface ClientInput {
@@ -184,8 +199,10 @@ export interface AdminOrder {
   settle_note: string
   /** 每条结算单价；null = 按实付金额 */
   unit_price: string | null
-  /** 应结（USD）：已付条数 × 单价，或实付合计 */
+  /** 你要付给客户的（USD）：已付条数 × 单价，或客户实付合计 */
   due_amount: string
+  /** 客户赚的 = due_amount − 客户实付合计 */
+  client_profit: string
   /** 打款记录条数 */
   settlements: string | null
   wallet_network: string | null
@@ -218,12 +235,14 @@ export function randomPassword(length = 12): string {
   return Array.from(bytes, (b) => chars[b % chars.length]).join('')
 }
 
-export type SettleStatus = 'unsettled' | 'partial' | 'settled'
+export type SettleStatus = 'unsettled' | 'partial' | 'settled' | 'prepaid'
 
 export const SETTLE_STATUS_META: Record<SettleStatus, { text: string; color: string }> = {
   unsettled: { text: '未结算', color: 'orange' },
   partial: { text: '部分结算', color: 'blue' },
-  settled: { text: '已结算', color: 'green' }
+  settled: { text: '已结清', color: 'green' },
+  /** 先打款给客户、超过应付的部分 */
+  prepaid: { text: '已预付', color: 'purple' }
 }
 
 /** 一笔打款（结算记录） */

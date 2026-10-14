@@ -109,20 +109,22 @@ const columns = [
   { title: '收款地址', key: 'wallet', width: 200 },
   { title: '待付', key: 'claimed', width: 64 },
   { title: '已付', key: 'paid', width: 90 },
-  { title: '应结 / 未结', key: 'amount', width: 120 },
+  { title: '付客户 / 余额', key: 'amount', width: 180 },
   { title: '领取规则', key: 'rule', width: 120 },
   { title: '最近登录', key: 'login', width: 100 },
   { title: '', key: 'actions', width: 170 }
 ]
 const shortAddr = (s: string): string => (s.length > 16 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s)
 const summaryColumns = [
-  { title: '客户', key: 'name', width: 160, ellipsis: true },
-  { title: '待付', key: 'claimed', width: 80 },
-  { title: '已付', key: 'paid', width: 110 },
-  { title: '应结', key: 'due', width: 110 },
-  { title: '已结', key: 'settled', width: 90 },
-  { title: '未结', key: 'unsettled', width: 90 },
-  { title: '收款地址', key: 'wallet', width: 180 },
+  { title: '客户', key: 'name', width: 150, ellipsis: true },
+  { title: '待付', key: 'claimed', width: 70 },
+  { title: '已付', key: 'paid', width: 100 },
+  { title: '付客户', key: 'due', width: 110 },
+  { title: '客户实付', key: 'client_paid', width: 90 },
+  { title: '客户赚', key: 'client_profit', width: 90 },
+  { title: '已付客户', key: 'settled', width: 90 },
+  { title: '余额', key: 'balance', width: 104 },
+  { title: '收款地址', key: 'wallet', width: 170 },
   { title: '', key: 'act', width: 90 }
 ]
 const timeoutText = (m: number): string => (m % 1440 === 0 ? `${m / 1440} 天` : m % 60 === 0 ? `${m / 60} 小时` : `${m} 分钟`)
@@ -227,9 +229,14 @@ function onLinksChanged(_links: AdminLink[]): void {
                 <div class="stat-sub muted">Stripe 最近检查 {{ overview?.last_stripe_check ? overview.last_stripe_check.slice(11) : '-' }}</div>
               </a-card>
               <a-card size="small" class="stat-card">
-                <div class="stat-label"><a-tag color="blue" :bordered="false">已结 / 应结</a-tag></div>
+                <div class="stat-label"><a-tag color="blue" :bordered="false">已结 / 应付客户</a-tag></div>
                 <div class="stat-value">{{ money(overview?.settle?.settled, '$') }}</div>
-                <div class="stat-sub muted">应结 {{ money(overview?.settle?.due, '$') }} · 未结 <b :class="unsettledTotal > 0 ? 'warn' : ''">{{ money(unsettledTotal, '$') }}</b></div>
+                <div class="stat-sub muted">应付 {{ money(overview?.settle?.due, '$') }} · 未结 <b :class="unsettledTotal > 0 ? 'warn' : ''">{{ money(unsettledTotal, '$') }}</b></div>
+              </a-card>
+              <a-card size="small" class="stat-card">
+                <div class="stat-label"><a-tag color="cyan" :bordered="false">客户实付 Stripe</a-tag></div>
+                <div class="stat-value">{{ money(overview?.settle?.client_paid, '$') }}</div>
+                <div class="stat-sub muted">客户赚 <b class="ok">{{ money(overview?.settle?.client_profit, '$') }}</b></div>
               </a-card>
             </div>
             <a-card size="small" title="客户结算概况">
@@ -255,9 +262,21 @@ function onLinksChanged(_links: AdminLink[]): void {
                     {{ money(record.due, '$') }}
                     <div v-if="record.unit_price != null" class="muted small">每条 {{ money(record.unit_price, '$') }}</div>
                   </template>
+                  <template v-else-if="column.key === 'client_paid'"><span class="muted">{{ money(record.client_paid, '$') }}</span></template>
+                  <template v-else-if="column.key === 'client_profit'">
+                    <b :class="n(record.client_profit) >= 0 ? 'ok' : 'danger'">{{ money(record.client_profit, '$') }}</b>
+                  </template>
                   <template v-else-if="column.key === 'settled'"><span class="ok">{{ money(record.settled, '$') }}</span></template>
-                  <template v-else-if="column.key === 'unsettled'">
-                    <b :class="n(record.unsettled) > 0 ? 'warn' : 'muted'">{{ money(record.unsettled, '$') }}</b>
+                  <template v-else-if="column.key === 'balance'">
+                    <a-tag v-if="Math.abs(n(record.balance)) < 0.005" color="green" :bordered="false">已结清</a-tag>
+                    <template v-else-if="n(record.balance) > 0">
+                      <b class="primary">+{{ money(record.balance, '$').slice(1) }}</b>
+                      <div class="muted small">已预付</div>
+                    </template>
+                    <template v-else>
+                      <b class="warn">{{ money(-n(record.balance), '$') }}</b>
+                      <div class="muted small">待结算</div>
+                    </template>
                   </template>
                   <template v-else-if="column.key === 'wallet'">
                     <template v-if="record.wallet_address">
@@ -345,7 +364,10 @@ function onLinksChanged(_links: AdminLink[]): void {
             </template>
             <template v-else-if="column.key === 'amount'">
               <div>{{ money(record.due, '$') }}<span v-if="record.unit_price != null" class="muted small"> · 每条 {{ money(record.unit_price, '$') }}</span></div>
-              <div class="small" :class="n(record.unsettled) > 0 ? 'warn' : 'muted'">未结 {{ money(record.unsettled, '$') }}</div>
+              <div class="muted small">客户实付 {{ money(record.client_paid, '$') }} · 赚 {{ money(record.client_profit, '$') }}</div>
+              <div class="small" :class="n(record.balance) > 0 ? 'primary' : n(record.unsettled) > 0 ? 'warn' : 'muted'">
+                {{ n(record.balance) > 0 ? `已预付 ${money(record.balance, '$')}` : n(record.unsettled) > 0 ? `待结算 ${money(record.unsettled, '$')}` : '已结清' }}
+              </div>
             </template>
             <template v-else-if="column.key === 'rule'">
               <span class="small">每次 ≤ {{ record.max_claim }} 条 · {{ timeoutText(record.claim_timeout_minutes) }}</span>
@@ -417,6 +439,8 @@ function onLinksChanged(_links: AdminLink[]): void {
 .tab-body { display: flex; flex-direction: column; gap: 16px; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
 .warn { color: #fa8c16; }
+.danger { color: #ff4d4f; }
+.primary { color: var(--ant-color-primary, #1677ff); }
 .ok { color: #52c41a; }
 .muted { color: var(--kal-muted); }
 .small { font-size: 12px; }

@@ -51,7 +51,7 @@ const amountHint = computed(() => {
   const o = props.order ?? orders.value.find((x) => x.id === orderId.value)
   if (!o) return '不挂批次时这笔只算进客户的已结总额'
   const left = leftOf(o)
-  return `${o.code}：应结 $${n(o.due_amount).toFixed(2)} · 已结 $${n(o.settled_amount).toFixed(2)}${left > 0.004 ? ` · 还差 $${left.toFixed(2)}` : ' · 已结清'}`
+  return `${o.code}：应付客户 $${n(o.due_amount).toFixed(2)} · 已结 $${n(o.settled_amount).toFixed(2)}${left > 0.004 ? ` · 还差 $${left.toFixed(2)}` : ' · 已结清'}`
 })
 const txOk = computed(() => !txHash.value || validTxHash(network.value, txHash.value.trim()))
 

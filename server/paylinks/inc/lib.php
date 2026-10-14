@@ -540,6 +540,8 @@ function send_proof(string $name, string $mime): never
 function settle_status_for(float $due, float $settled): string
 {
     if ($settled <= 0) return 'unsettled';
+    // 先打款给客户、客户还没付完的情况：已结多于应付，标成「已预付」
+    if ($settled > $due + 0.005) return 'prepaid';
     return $settled + 0.005 >= $due ? 'settled' : 'partial';
 }
 
@@ -558,19 +560,50 @@ function order_due(int $orderId): float
     )->fetchColumn();
 }
 
-/** 每个客户的应结合计：client_id → 金额 */
-function client_due_map(?int $clientId = null): array
+/**
+ * 每个客户的结算汇总：client_id → [应结, 客户实付, 客户利润]
+ *   应结   = 你按单价要付给客户的（已付条数 × 单价；没设单价时按实付金额）
+ *   实付   = 客户实际在 Stripe 付掉的（每条 amount_due 合计）
+ *   利润   = 应结 − 实付，客户赚的
+ */
+function client_settle_map(?int $clientId = null): array
 {
     $where = $clientId ? "WHERE o.client_id = $clientId" : '';
     $map = [];
-    foreach (db()->query("SELECT o.client_id, " . DUE_SQL . " AS due FROM orders o LEFT JOIN links l ON l.order_id = o.id $where GROUP BY o.id") as $r) {
-        $map[$r['client_id']] = ($map[$r['client_id']] ?? 0) + (float) $r['due'];
+    $add = function (array &$map, $cid, float $due, float $paid): void {
+        $slot = &$map[$cid];
+        $slot ??= ['due' => 0.0, 'paid' => 0.0];
+        $slot['due'] += $due;
+        $slot['paid'] += $paid;
+    };
+    foreach (db()->query(
+        "SELECT o.client_id, " . DUE_SQL . " AS due, COALESCE(SUM(IF(l.status = 'paid', l.amount_due, 0)), 0) AS paid
+         FROM orders o LEFT JOIN links l ON l.order_id = o.id $where GROUP BY o.id"
+    ) as $r) {
+        $add($map, $r['client_id'], (float) $r['due'], (float) $r['paid']);
     }
+    // 没挂批次的已付款：没有单价可依，应结就按实付算（利润 0）
     $where2 = $clientId ? "AND client_id = $clientId" : '';
-    foreach (db()->query("SELECT client_id, SUM(amount_due) AS due FROM links WHERE status = 'paid' AND order_id IS NULL AND client_id IS NOT NULL $where2 GROUP BY client_id") as $r) {
-        $map[$r['client_id']] = ($map[$r['client_id']] ?? 0) + (float) $r['due'];
+    foreach (db()->query(
+        "SELECT client_id, SUM(amount_due) AS paid FROM links
+         WHERE status = 'paid' AND order_id IS NULL AND client_id IS NOT NULL $where2 GROUP BY client_id"
+    ) as $r) {
+        $add($map, $r['client_id'], (float) $r['paid'], (float) $r['paid']);
     }
-    return array_map(fn ($v) => round($v, 2), $map);
+    foreach ($map as &$v) {
+        $v = [
+            'due' => round($v['due'], 2),
+            'client_paid' => round($v['paid'], 2),
+            'client_profit' => round($v['due'] - $v['paid'], 2),
+        ];
+    }
+    return $map;
+}
+
+/** 只要应结：client_id → 金额 */
+function client_due_map(?int $clientId = null): array
+{
+    return array_map(fn ($v) => $v['due'], client_settle_map($clientId));
 }
 
 /** 单价：空串 / null = 按实付金额；否则 0 ~ 1000 */

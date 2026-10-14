@@ -83,10 +83,12 @@ function admin_overview(): never
         'desktop' => meta_get('desktop_sync'),
         'stuck_checking' => $stuck,
         'settle' => [
-            'due' => round(array_sum(client_due_map()), 2),
+            'due' => round(array_sum(array_column(client_settle_map(), 'due')), 2),
+            'client_paid' => round(array_sum(array_column(client_settle_map(), 'client_paid')), 2),
+            'client_profit' => round(array_sum(array_column(client_settle_map(), 'client_profit')), 2),
             'settled' => round((float) $pdo->query("SELECT COALESCE(SUM(settled_amount), 0) FROM orders")->fetchColumn()
                 + (float) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM settlements WHERE order_id IS NULL")->fetchColumn(), 2),
-            'unsettled_orders' => (int) $pdo->query("SELECT COUNT(*) FROM orders o WHERE o.settle_status <> 'settled'
+            'unsettled_orders' => (int) $pdo->query("SELECT COUNT(*) FROM orders o WHERE o.settle_status NOT IN ('settled', 'prepaid')
                 AND EXISTS (SELECT 1 FROM links l WHERE l.order_id = o.id AND l.status = 'paid')")->fetchColumn(),
             'open_orders' => (int) $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'open'")->fetchColumn(),
         ],
@@ -115,11 +117,17 @@ function admin_clients(): never
            UNION ALL SELECT client_id, amount FROM settlements WHERE order_id IS NULL
          ) x GROUP BY client_id"
     ) as $r) $settled[$r['client_id']] = round((float) $r['v'], 2);
-    $due = client_due_map();
+    $sum = client_settle_map();
     foreach ($rows as &$r) {
-        $r['due'] = $due[$r['id']] ?? 0;
+        $s = $sum[$r['id']] ?? ['due' => 0, 'client_paid' => 0, 'client_profit' => 0];
+        $r['due'] = $s['due'];
+        $r['client_paid'] = $s['client_paid'];
+        $r['client_profit'] = $s['client_profit'];
         $r['settled'] = $settled[$r['id']] ?? 0;
+        // 余额 = 已结 − 应付：正数是你预付多了（客户欠你链接），负数是还没结够
+        $r['balance'] = round($r['settled'] - $r['due'], 2);
         $r['unsettled'] = round(max(0, $r['due'] - $r['settled']), 2);
+        $r['prepaid'] = round(max(0, $r['settled'] - $r['due']), 2);
     }
     unset($r);
     json_out(['ok' => true, 'clients' => $rows]);
@@ -355,7 +363,7 @@ function admin_orders(array $in): never
         $where[] = 'o.id = ?';
         $args[] = (int) $in['id'];
     }
-    if (in_array($in['settle'] ?? '', ['unsettled', 'partial', 'settled'], true)) {
+    if (in_array($in['settle'] ?? '', ['unsettled', 'partial', 'settled', 'prepaid'], true)) {
         $where[] = 'o.settle_status = ?';
         $args[] = $in['settle'];
     }
@@ -378,6 +386,7 @@ function admin_orders(array $in): never
                 SUM(l.status IN ('superseded', 'refresh')) AS void,
                 SUM(IF(l.status = 'paid', l.amount_due, 0)) AS paid_usd, SUM(IF(l.status = 'paid', l.amount_cny, 0)) AS paid_cny,
                 " . DUE_SQL . " AS due_amount,
+                " . DUE_SQL . " - COALESCE(SUM(IF(l.status = 'paid', l.amount_due, 0)), 0) AS client_profit,
                 (SELECT COUNT(*) FROM settlements s WHERE s.order_id = o.id) AS settlements
          FROM orders o LEFT JOIN clients c ON c.id = o.client_id LEFT JOIN links l ON l.order_id = o.id
          WHERE $sql GROUP BY o.id ORDER BY o.status = 'open' DESC, o.id DESC LIMIT $size OFFSET $offset"

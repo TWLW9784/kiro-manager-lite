@@ -26,7 +26,7 @@ const A = {
 
 // ============ 小部件 ============
 const ORDER = { open: ['info', '进行中'], done: ['ok', '已完成'], cancelled: ['', '已取消'] }
-const SETTLE = { unsettled: ['warn', '未结算'], partial: ['info', '部分结算'], settled: ['ok', '已结算'] }
+const SETTLE = { unsettled: ['warn', '未结算'], partial: ['info', '部分结算'], settled: ['ok', '已结清'], prepaid: ['primary', '已预付'] }
 const LINK = {
   available: ['primary', '可领取'], claimed: ['warn', '已领待付'], checking: ['info', '确认中'],
   paid: ['ok', '已付款'], refresh: ['', '待换新'], superseded: ['void', '已作废']
@@ -35,6 +35,14 @@ const badge = (map, k) => `<span class="badge ${map[k]?.[0] ?? ''}">${esc(map[k]
 const sourceTag = (o) => (o.source === 'offline' ? '<span class="badge plain" title="线下（TXT / Excel）发出后补建：不从池子领、不自动补">线下</span>' : '')
 const netName = (id) => A.networkNames[id] || id
 const empty = (title, hint = '') => `<div class="empty"><b>${esc(title)}</b>${esc(hint)}</div>`
+/** 余额 = 已付客户 − 应付客户。正数 = 你预付了（客户还要继续付链接），负数 = 还欠客户 */
+function balanceCell(c) {
+  const b = num(c.balance)
+  if (Math.abs(b) < 0.005) return '<span class="badge ok">已结清</span>'
+  return b > 0
+    ? `<b class="primary">+${usd(b).slice(1)}</b><div class="small muted">已预付</div>`
+    : `<b class="warn">${usd(-b)}</b><div class="small muted">待结算</div>`
+}
 const progress = (paid, qty) => {
   const pct = Math.min(100, Math.round((num(paid) / Math.max(1, num(qty))) * 100))
   return `<div class="progress" title="${pct}%"><span style="width:${pct}%"></span></div>`
@@ -81,20 +89,24 @@ async function viewOverview() {
       <div class="card stat accent-warn"><span class="stat-label">客户待付</span><span class="stat-value">${(tot.claimed?.n ?? 0) + (tot.checking?.n ?? 0)}</span>
         <span class="stat-sub">${tot.checking?.n ? `${tot.checking.n} 条确认中` : usd(tot.claimed?.usd)}</span></div>
       <div class="card stat accent-ok"><span class="stat-label">今日已付</span><span class="stat-value">${paidToday}</span><span class="stat-sub">累计 ${tot.paid?.n ?? 0} 条</span></div>
-      <div class="card stat"><span class="stat-label">应结 / 已结</span><span class="stat-value">${usd(o.settle.settled)}</span>
-        <span class="stat-sub">应结 ${usd(o.settle.due)} · 未结 <b class="${unsettled > 0 ? 'warn' : ''}">${usd(unsettled)}</b></span></div>
+      <div class="card stat"><span class="stat-label">付客户 / 已结</span><span class="stat-value">${usd(o.settle.settled)}</span>
+        <span class="stat-sub">应付 ${usd(o.settle.due)} · 未结 <b class="${unsettled > 0 ? 'warn' : ''}">${usd(unsettled)}</b></span></div>
+      <div class="card stat"><span class="stat-label">客户实付 Stripe</span><span class="stat-value">${usd(o.settle.client_paid)}</span>
+        <span class="stat-sub">客户赚 <b class="ok">${usd(o.settle.client_profit)}</b></span></div>
     </div>
     <div class="card">
       <div class="card-head"><h2>客户结算概况</h2><button class="btn sm" data-goto="settlements">结算记录</button></div>
       ${A.clients.length ? `<div class="table-wrap"><table class="table stack"><thead><tr>
-          <th>客户</th><th class="right">待付</th><th class="right">已付</th><th class="right">应结</th><th class="right">已结</th><th class="right">未结</th><th>收款地址</th><th></th>
+          <th>客户</th><th class="right">待付</th><th class="right">已付</th><th class="right">付客户</th><th class="right">客户实付</th><th class="right">客户赚</th><th class="right">已付客户</th><th class="right">余额</th><th>收款地址</th><th></th>
         </tr></thead><tbody>${A.clients.map((c) => `<tr>
           <td data-label="客户"><b>${esc(c.display_name || c.username)}</b><div class="small muted">${esc(c.username)}</div></td>
           <td data-label="待付" class="right num">${num(c.claimed)}</td>
           <td data-label="已付" class="right num">${num(c.paid)}<div class="small muted">今日 ${num(c.paid_today)}</div></td>
-          <td data-label="应结" class="right num">${usd(c.due)}</td>
-          <td data-label="已结" class="right num ok">${usd(c.settled)}</td>
-          <td data-label="未结" class="right num ${num(c.unsettled) > 0 ? 'warn' : ''}"><b>${usd(c.unsettled)}</b></td>
+          <td data-label="付客户" class="right num">${usd(c.due)}${c.unit_price !== null ? `<div class="small muted">每条 ${usd(c.unit_price)}</div>` : ''}</td>
+          <td data-label="客户实付" class="right num text-2">${usd(c.client_paid)}</td>
+          <td data-label="客户赚" class="right num"><b class="${num(c.client_profit) >= 0 ? 'ok' : 'danger'}">${usd(c.client_profit)}</b></td>
+          <td data-label="已付客户" class="right num ok">${usd(c.settled)}</td>
+          <td data-label="余额" class="right num">${balanceCell(c)}</td>
           <td data-label="收款地址">${walletCell(c)}</td>
           <td class="right"><button class="btn sm" data-client-orders="${c.id}">批次</button></td>
         </tr>`).join('')}</tbody></table></div>` : empty('还没有客户')}
@@ -128,13 +140,16 @@ async function viewOrders() {
       ${f.client_id || f.settle || f.q || f.status !== 'open' ? '<button class="btn sm" data-of-reset>重置筛选</button>' : ''}
     </div>
     ${r.orders.length ? `<div class="table-wrap"><table class="table stack"><thead><tr>
-        <th>批次</th><th>客户</th><th>档位</th><th>进度</th><th class="right">应结</th><th>结算</th><th>状态</th><th>创建</th><th></th>
+        <th>批次</th><th>客户</th><th>档位</th><th>进度</th><th class="right">付客户</th><th class="right">客户赚</th><th>结算</th><th>状态</th><th>创建</th><th></th>
       </tr></thead><tbody>${r.orders.map((o) => `<tr class="clickable" data-order="${o.id}">
         <td data-label="批次"><b>${esc(o.code)}</b> ${sourceTag(o)}${o.note ? `<div class="small muted">${esc(o.note)}</div>` : ''}</td>
         <td data-label="客户">${esc(o.client || '-')}</td>
         <td data-label="档位">${esc(o.tier)} × ${o.quantity}</td>
         <td data-label="进度">${progress(o.paid, o.quantity)}<span class="small text-2">已付 ${num(o.paid)} · 待付 ${num(o.holding)}${num(o.void) ? ` · 作废 ${num(o.void)}` : ''}</span></td>
-        <td data-label="应结" class="right num">${usd(o.due_amount)}${o.unit_price !== null ? `<div class="small muted">每条 ${usd(o.unit_price)}</div>` : ''}</td>
+        <td data-label="付客户" class="right num nowrap">${usd(o.due_amount)}
+          <div class="small muted">${o.unit_price !== null ? `${num(o.paid)} × ${usd(o.unit_price)}` : '按实付'}</div>
+          <div class="small muted">实付 ${usd(o.paid_usd)}</div></td>
+        <td data-label="客户赚" class="right num">${o.unit_price !== null ? `<b class="${num(o.client_profit) >= 0 ? 'ok' : 'danger'}">${usd(o.client_profit)}</b>` : '<span class="muted">-</span>'}</td>
         <td data-label="结算">${badge(SETTLE, o.settle_status)}${num(o.settled_amount) ? `<div class="small muted num">${usd(o.settled_amount)}</div>` : ''}</td>
         <td data-label="状态">${badge(ORDER, o.status)}</td>
         <td data-label="创建" class="small text-2">${dt(o.created_at)}</td>
@@ -193,8 +208,10 @@ async function openOrder(id) {
       <div class="stats">
         <div class="card stat accent-ok"><span class="stat-label">已付</span><span class="stat-value">${num(o.paid)} / ${o.quantity}</span>${progress(o.paid, o.quantity)}</div>
         <div class="card stat accent-warn"><span class="stat-label">待付</span><span class="stat-value">${num(o.holding)}</span><span class="stat-sub">${num(o.void) ? `作废 ${num(o.void)}` : '&nbsp;'}</span></div>
-        <div class="card stat"><span class="stat-label">应结</span><span class="stat-value">${usd(due)}</span>
-          <span class="stat-sub">${o.unit_price !== null ? `已付 ${num(o.paid)} 条 × ${usd(o.unit_price)}` : `按实付合计 · ≈ ${cny(o.paid_cny)}`}</span></div>
+        <div class="card stat"><span class="stat-label">付客户</span><span class="stat-value">${usd(due)}</span>
+          <span class="stat-sub">${o.unit_price !== null ? `${num(o.paid)} 条 × ${usd(o.unit_price)}` : '按客户实付合计'}</span></div>
+        <div class="card stat"><span class="stat-label">客户实付 Stripe</span><span class="stat-value">${usd(o.paid_usd)}</span>
+          <span class="stat-sub">≈ ${cny(o.paid_cny)}${o.unit_price !== null ? ` · 客户赚 <b class="${num(o.client_profit) >= 0 ? 'ok' : 'danger'}">${usd(o.client_profit)}</b>` : ''}</span></div>
         <div class="card stat accent-primary"><span class="stat-label">已结</span><span class="stat-value">${usd(o.settled_amount)}</span>
           <span class="stat-sub">${badge(SETTLE, o.settle_status)} ${left > 0.004 ? `还差 ${usd(left)}` : ''}</span></div>
       </div>
@@ -208,9 +225,12 @@ async function openOrder(id) {
           </dl>` : '<div class="callout warn"><div class="grow"><b>客户还没设置收款地址</b><span class="small">让客户在门户「收款设置」里填，或在客户页代填。</span></div></div>'}
         </div></div>
         <form class="card" id="settle-form"><div class="card-head"><h2>结算状态</h2></div><div class="card-body form-grid">
-          <label class="field"><span>状态</span><select name="settle_status">${Object.entries(SETTLE).map(([k, [, l]]) => `<option value="${k}" ${o.settle_status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+          <label class="field"><span>状态</span><select name="settle_status">${Object.entries(SETTLE).map(([k, [, l]]) => `<option value="${k}" ${o.settle_status === k ? 'selected' : ''}>${l}</option>`).join('')}</select>
+            <span class="hint">记打款会自动判断：超过应付 = 已预付</span></label>
           <label class="field"><span>已结金额（USD）</span><input name="settled_amount" type="number" step="0.01" min="0" value="${num(o.settled_amount).toFixed(2)}"></label>
-          <label class="field span-2"><span>每条结算单价（留空 = 按每条实付金额）</span><input name="unit_price" type="number" step="0.01" min="0" value="${o.unit_price ?? ''}" placeholder="如 5.00：应结 = 已付条数 × 5.00"></label>
+          <label class="field span-2"><span>每条结算单价（USD，留空 = 按客户实付金额）</span>
+            <input name="unit_price" type="number" step="0.01" min="0" value="${o.unit_price ?? ''}" placeholder="如 10.00：付客户 = 已付条数 × 10.00">
+            <span class="hint">你按这个单价付给客户，客户拿去 Stripe 实际付掉，差额是客户赚的</span></label>
           <label class="field span-2"><span>结算备注</span><input name="settle_note" maxlength="255" value="${esc(o.settle_note || '')}" placeholder="如：按 1:1 结算，扣手续费 1 USDT"></label>
           <div class="span-2 btn-group"><button class="btn primary">保存结算状态</button><span class="small muted">记一笔打款会自动累加已结金额并更新状态；这里可以手动改</span></div>
         </div></form>

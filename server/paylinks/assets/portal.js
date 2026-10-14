@@ -19,7 +19,7 @@ const S = {
 
 // ============ 小部件 ============
 const ORDER_STATUS = { open: 'info', done: 'ok', cancelled: '' }
-const SETTLE = { unsettled: 'warn', partial: 'info', settled: 'ok' }
+const SETTLE = { unsettled: 'warn', partial: 'info', settled: 'ok', prepaid: 'primary' }
 const LINK = { claimed: 'warn', checking: 'info', paid: 'ok', void: 'void' }
 const orderBadge = (s) => `<span class="badge ${ORDER_STATUS[s] ?? ''}">${esc(t(`order_${s}`))}</span>`
 const settleBadge = (s) => `<span class="badge ${SETTLE[s] ?? ''}">${esc(t(`settle_${s}`))}</span>`
@@ -123,9 +123,11 @@ async function viewWork() {
       <div class="card stat accent-ok"><span class="stat-label">${esc(t('stat_paid'))}</span><span class="stat-value">${s.paid}</span>
         <span class="stat-sub">${esc(t('stat_today_n', { n: s.paid_today }))}</span></div>
       <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(s.due)}</span>
-        <span class="stat-sub">${esc(t('stat_due_sub'))}</span></div>
+        <span class="stat-sub">${esc(t('stat_paid_out_n', { n: usd(s.paid_usd) }))}</span></div>
       <div class="card stat accent-primary"><span class="stat-label">${esc(t('stat_settled'))}</span><span class="stat-value">${usd(s.settled)}</span>
-        <span class="stat-sub">${esc(t('stat_unsettled_n', { n: usd(s.unsettled) }))}</span></div>
+        <span class="stat-sub">${num(s.prepaid) > 0.004 ? esc(t('stat_prepaid_n', { n: usd(s.prepaid) })) : esc(t('stat_unsettled_n', { n: usd(s.unsettled) }))}</span></div>
+      <div class="card stat accent-ok"><span class="stat-label">${esc(t('stat_profit'))}</span><span class="stat-value">${usd(s.profit)}</span>
+        <span class="stat-sub">${esc(t('stat_profit_sub'))}</span></div>
     </div>
     ${claimCard}
     <div class="card" id="pending-card">
@@ -193,7 +195,9 @@ function ordersTable(rows) {
       <td data-label="${esc(t('col_batch'))}"><b>${esc(o.code)}</b> ${sourceTag(o)}${o.note ? `<div class="muted small">${esc(o.note)}</div>` : ''}</td>
       <td data-label="${esc(t('col_tier'))}">${esc(o.tier)} × ${o.quantity}</td>
       <td data-label="${esc(t('col_progress'))}">${progress(o)}<span class="small text-2">${esc(t('progress_short', { paid: num(o.paid), qty: o.quantity, holding: num(o.holding) }))}</span></td>
-      <td data-label="${esc(t('col_paid_amount'))}" class="right num">${usd(o.due_amount)}${o.unit_price !== null ? `<div class="small muted">${esc(t('per_link', { p: usd(o.unit_price) }))}</div>` : ''}</td>
+      <td data-label="${esc(t('col_paid_amount'))}" class="right num">${usd(o.due_amount)}
+        <div class="small muted">${o.unit_price !== null ? esc(t('per_link', { p: usd(o.unit_price) })) : esc(t('settle_by_amount'))}</div>
+        ${o.unit_price !== null ? `<div class="small">${esc(t('col_profit'))} <b class="${num(o.profit) >= 0 ? 'ok' : 'danger'}">${usd(o.profit)}</b></div>` : ''}</td>
       <td data-label="${esc(t('col_status'))}">${orderBadge(o.status)}</td>
       <td data-label="${esc(t('col_settle'))}">${settleBadge(o.settle_status)}${num(o.settled_amount) ? `<div class="small muted num">${usd(o.settled_amount)}</div>` : ''}</td>
       <td data-label="${esc(t('col_created'))}" class="small text-2">${dt(o.created_at)}</td>
@@ -210,7 +214,7 @@ async function viewOrders() {
       <div class="seg" role="group">${seg('status', '', t('all'))}${seg('status', 'open', t('order_open'))}${seg('status', 'done', t('order_done'))}${seg('status', 'cancelled', t('order_cancelled'))}</div>
       <select data-f="settle" aria-label="${esc(t('col_settle'))}">
         <option value="">${esc(t('settle_all'))}</option>
-        ${['unsettled', 'partial', 'settled'].map((k) => `<option value="${k}" ${f.settle === k ? 'selected' : ''}>${esc(t(`settle_${k}`))}</option>`).join('')}
+        ${['unsettled', 'partial', 'settled', 'prepaid'].map((k) => `<option value="${k}" ${f.settle === k ? 'selected' : ''}>${esc(t(`settle_${k}`))}</option>`).join('')}
       </select>
     </div>
     ${ordersTable(r.orders)}
@@ -237,6 +241,9 @@ async function openOrder(id) {
           <span class="stat-sub">${num(o.void) ? esc(t('void_n', { n: num(o.void) })) : '&nbsp;'}</span></div>
         <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(due)}</span>
           <span class="stat-sub">${o.unit_price !== null ? esc(t('settle_by_count', { n: num(o.paid), p: usd(o.unit_price) })) : esc(t('settle_by_amount'))}</span></div>
+        <div class="card stat ${num(o.profit) >= 0 ? 'accent-ok' : ''}"><span class="stat-label">${esc(t('stat_profit'))}</span>
+          <span class="stat-value">${o.unit_price !== null ? usd(o.profit) : '-'}</span>
+          <span class="stat-sub">${esc(t('my_paid_n', { n: usd(o.paid_usd) }))}</span></div>
         <div class="card stat accent-primary"><span class="stat-label">${esc(t('stat_settled'))}</span><span class="stat-value">${usd(o.settled_amount)}</span>
           <span class="stat-sub">${settleBadge(o.settle_status)}</span></div>
       </div>
@@ -412,8 +419,13 @@ async function viewSettlements() {
   $('[data-section="settlements"]').innerHTML = `
     <div class="stats">
       <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(s.due)}</span><span class="stat-sub">${esc(t('stat_due_sub'))}</span></div>
+      <div class="card stat accent-ok"><span class="stat-label">${esc(t('stat_profit'))}</span><span class="stat-value">${usd(s.profit)}</span>
+        <span class="stat-sub">${esc(t('stat_paid_out_n', { n: usd(s.paid_usd) }))}</span></div>
       <div class="card stat accent-ok"><span class="stat-label">${esc(t('stat_settled'))}</span><span class="stat-value">${usd(s.settled)}</span><span class="stat-sub">${esc(t('settle_records_n', { n: r.total }))}</span></div>
-      <div class="card stat accent-warn"><span class="stat-label">${esc(t('stat_unsettled'))}</span><span class="stat-value">${usd(s.unsettled)}</span><span class="stat-sub">${esc(t('settle_rule'))}</span></div>
+      <div class="card stat ${num(s.prepaid) > 0.004 ? 'accent-primary' : 'accent-warn'}">
+        <span class="stat-label">${num(s.prepaid) > 0.004 ? esc(t('stat_prepaid')) : esc(t('stat_unsettled'))}</span>
+        <span class="stat-value">${usd(num(s.prepaid) > 0.004 ? s.prepaid : s.unsettled)}</span>
+        <span class="stat-sub">${esc(t('settle_rule'))}</span></div>
     </div>
     <div class="card"><div class="card-head"><h2>${esc(t('settlements_title'))}</h2></div>
       ${settlementsTable(r.settlements)}<div class="pager" id="settle-pager"></div></div>`

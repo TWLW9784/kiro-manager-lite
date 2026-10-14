@@ -175,8 +175,11 @@ async function changeQty(): Promise<void> {
         <div class="stats">
           <a-card size="small"><div class="label">已付</div><div class="value ok">{{ n(order.paid) }} / {{ order.quantity }}</div><a-progress :percent="pct" size="small" :show-info="false" /></a-card>
           <a-card size="small"><div class="label">待付</div><div class="value warn">{{ n(order.holding) }}</div><div class="sub">{{ n(order.void) ? `作废 ${n(order.void)}` : ' ' }}</div></a-card>
-          <a-card size="small"><div class="label">应结</div><div class="value">{{ usd(order.due_amount) }}</div>
-            <div class="sub">{{ order.unit_price != null ? `已付 ${n(order.paid)} 条 × ${usd(order.unit_price)}` : `按实付合计 · ≈ ¥${n(order.paid_cny).toFixed(2)}` }}</div></a-card>
+          <a-card size="small"><div class="label">付客户</div><div class="value">{{ usd(order.due_amount) }}</div>
+            <div class="sub">{{ order.unit_price != null ? `${n(order.paid)} 条 × ${usd(order.unit_price)}` : '按客户实付合计' }}</div></a-card>
+          <a-card size="small"><div class="label">客户实付 Stripe</div><div class="value muted-value">{{ usd(order.paid_usd) }}</div>
+            <div class="sub">≈ ¥{{ n(order.paid_cny).toFixed(2) }}<template v-if="order.unit_price != null"> · 客户赚
+              <b :class="n(order.client_profit) >= 0 ? 'ok' : 'danger'">{{ usd(order.client_profit) }}</b></template></div></a-card>
           <a-card size="small"><div class="label">已结</div><div class="value primary">{{ usd(order.settled_amount) }}</div>
             <div class="sub"><a-tag :color="SETTLE_STATUS_META[order.settle_status].color" :bordered="false">{{ SETTLE_STATUS_META[order.settle_status].text }}</a-tag><template v-if="left > 0.004">还差 {{ usd(left) }}</template></div></a-card>
         </div>
@@ -206,7 +209,7 @@ async function changeQty(): Promise<void> {
               <a-form-item label="已结金额（USD）">
                 <a-input-number v-model:value="form.settled_amount" :min="0" :precision="2" style="width: 100%" />
               </a-form-item>
-              <a-form-item label="每条结算单价" :extra="form.unit_price == null ? '留空 = 按每条实付金额' : `应结 = 已付条数 × ${usd(form.unit_price)}`">
+              <a-form-item label="每条结算单价（USD）" :extra="form.unit_price == null ? '留空 = 按客户实付金额' : `付客户 = 已付条数 × ${usd(form.unit_price)}，差额是客户赚的`">
                 <a-input-number v-model:value="form.unit_price" :min="0" :max="1000" :precision="2" placeholder="留空 = 按实付" style="width: 100%" />
               </a-form-item>
               <a-form-item label="结算备注" class="span-2">
@@ -279,7 +282,8 @@ async function changeQty(): Promise<void> {
 
 <style scoped>
 .body { display: flex; flex-direction: column; gap: 14px; }
-.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.muted-value { color: var(--kal-muted); }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 @media (max-width: 760px) { .stats { grid-template-columns: 1fr 1fr; } .two { grid-template-columns: 1fr; } }
 .label { font-size: 12px; color: var(--kal-muted); }
@@ -288,6 +292,7 @@ async function changeQty(): Promise<void> {
 .ok { color: #52c41a; }
 .warn { color: #fa8c16; }
 .primary { color: var(--ant-color-primary, #1677ff); }
+.danger { color: #ff4d4f; }
 .settle-form { display: grid; grid-template-columns: 1fr 1fr; column-gap: 10px; }
 .settle-form :deep(.ant-form-item) { margin-bottom: 10px; }
 .span-2 { grid-column: span 2; }

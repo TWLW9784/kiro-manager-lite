@@ -12,12 +12,15 @@ async function viewSettlements() {
   $('#top-actions').innerHTML = '<button class="btn primary" data-add-settle-top>＋ 记一笔打款</button>'
   const owed = A.clients.filter((c) => num(c.unsettled) > 0.004)
   $('[data-section="settlements"]').innerHTML = `
-    ${owed.length ? `<div class="card"><div class="card-head"><h2>待结算</h2><span class="small muted">按客户：应结 − 已结</span></div>
-      <div class="table-wrap"><table class="table stack"><thead><tr><th>客户</th><th class="right">应结</th><th class="right">已结</th><th class="right">未结</th><th>收款地址</th><th></th></tr></thead>
+    ${owed.length ? `<div class="card"><div class="card-head"><h2>待结算</h2><span class="small muted">按客户：应付客户 − 已付客户；先预付的会显示在客户页的余额里</span></div>
+      <div class="table-wrap"><table class="table stack"><thead><tr><th>客户</th><th class="right">付客户</th><th class="right">客户实付</th><th class="right">客户赚</th><th class="right">已付客户</th><th class="right">待结算</th><th>收款地址</th><th></th></tr></thead>
       <tbody>${owed.map((c) => `<tr>
         <td data-label="客户"><b>${esc(c.display_name || c.username)}</b></td>
-        <td data-label="应结" class="right num">${usd(c.due)}</td><td data-label="已结" class="right num ok">${usd(c.settled)}</td>
-        <td data-label="未结" class="right num warn"><b>${usd(c.unsettled)}</b></td>
+        <td data-label="付客户" class="right num">${usd(c.due)}</td>
+        <td data-label="客户实付" class="right num text-2">${usd(c.client_paid)}</td>
+        <td data-label="客户赚" class="right num"><b class="${num(c.client_profit) >= 0 ? 'ok' : 'danger'}">${usd(c.client_profit)}</b></td>
+        <td data-label="已付客户" class="right num ok">${usd(c.settled)}</td>
+        <td data-label="待结算" class="right num warn"><b>${usd(c.unsettled)}</b></td>
         <td data-label="收款地址">${walletCell(c)}</td>
         <td class="right nowrap"><button class="btn sm" data-client-orders="${c.id}" data-settle-filter="unsettled">未结批次</button>
           <button class="btn sm primary" data-pay-client="${c.id}">打款</button></td>
@@ -37,14 +40,15 @@ async function viewClients() {
   $('#top-actions').innerHTML = '<button class="btn primary" data-edit-client="new">＋ 新建客户</button>'
   $('[data-section="clients"]').innerHTML = `<div class="card">
     ${A.clients.length ? `<div class="table-wrap"><table class="table stack"><thead><tr>
-        <th>客户</th><th>状态</th><th>收款地址</th><th class="right">待付</th><th class="right">已付</th><th class="right">未结</th><th>领取时限</th><th>最近登录</th><th></th>
+        <th>客户</th><th>状态</th><th>收款地址</th><th class="right">待付</th><th class="right">已付</th><th class="right">余额</th><th>领取时限</th><th>最近登录</th><th></th>
       </tr></thead><tbody>${A.clients.map((c) => `<tr>
         <td data-label="客户"><b>${esc(c.display_name || c.username)}</b><div class="small muted">${esc(c.username)}${c.note ? ` · ${esc(c.note)}` : ''}</div></td>
         <td data-label="状态">${c.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">已停用</span>'}</td>
         <td data-label="收款地址">${walletCell(c)}</td>
         <td data-label="待付" class="right num">${num(c.claimed)}</td>
-        <td data-label="已付" class="right num">${num(c.paid)}<div class="small muted">应结 ${usd(c.due)}${c.unit_price !== null ? ` · 每条 ${usd(c.unit_price)}` : ''}</div></td>
-        <td data-label="未结" class="right num ${num(c.unsettled) > 0 ? 'warn' : ''}">${usd(c.unsettled)}</td>
+        <td data-label="已付" class="right num">${num(c.paid)}<div class="small muted">付客户 ${usd(c.due)}${c.unit_price !== null ? ` · 每条 ${usd(c.unit_price)}` : ''}</div>
+          <div class="small muted">实付 ${usd(c.client_paid)} · 赚 ${usd(c.client_profit)}</div></td>
+        <td data-label="余额" class="right num">${balanceCell(c)}</td>
         <td data-label="领取时限" class="small">${num(c.claim_timeout_minutes) % 1440 === 0 ? `${num(c.claim_timeout_minutes) / 1440} 天` : `${Math.round(num(c.claim_timeout_minutes) / 60)} 小时`}</td>
         <td data-label="最近登录" class="small text-2">${dt(c.last_login_at)}</td>
         <td class="right nowrap"><button class="btn sm" data-edit-client="${c.id}">编辑</button>
@@ -72,7 +76,7 @@ function clientModal(c) {
         `<option value="${v}" ${num(c?.claim_timeout_minutes ?? 1440) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
         <span class="hint">客户在网站上领走后这么久没付，自动作废换新；线下发出的批次不受限制</span></label>
       <label class="field"><span>单次最多领取</span><input name="max_claim" type="number" min="1" max="500" value="${num(c?.max_claim ?? 50)}"></label>
-      <label class="field"><span>默认每条结算单价（可空）</span><input name="unit_price" type="number" step="0.01" min="0" value="${c?.unit_price ?? ''}" placeholder="空 = 按每条实付金额"></label>
+      <label class="field"><span>默认每条结算单价（USD，可空）</span><input name="unit_price" type="number" step="0.01" min="0" value="${c?.unit_price ?? ''}" placeholder="空 = 按客户实付金额"></label>
       <label class="field"><span>备注</span><input name="note" value="${esc(c?.note ?? '')}" maxlength="255"></label>
       <div class="span-2 section-title">收款地址（只支持 Polygon；客户自己在门户里填，需要时可代填）</div>
       <label class="field"><span>网络</span><select name="wallet_network">${A.networks.map((n) => `<option value="${n.id}" ${(c?.wallet_network ?? 'polygon') === n.id ? 'selected' : ''}>${n.name}</option>`).join('')}</select></label>

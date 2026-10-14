@@ -61,7 +61,7 @@ async function save(): Promise<void> {
           <a-input-number v-model:value="quantity" :min="1" :max="500" :precision="0" addon-after="条" style="width: 100%" />
         </a-form-item>
       </div>
-      <a-form-item label="每条结算单价（USD，可空）" extra="填了：应结 = 已付条数 × 单价；留空用客户的默认单价，客户也没设就按每条实付金额">
+      <a-form-item label="每条结算单价（USD，可空）" extra="你按这个单价付给客户：付客户 = 已付条数 × 单价。留空用客户的默认单价，都没有就按客户实付金额">
         <a-input-number v-model:value="unitPrice" :min="0" :max="1000" :precision="2" placeholder="如 5.00" style="width: 100%" />
       </a-form-item>
       <a-form-item label="可更换次数" extra="留空 = 和目标付款数一样多。客户点「更换」不占名额，但不能超过这个次数">

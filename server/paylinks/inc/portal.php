@@ -33,7 +33,8 @@ function action_me(): never
                FROM orders o2 LEFT JOIN links l ON l.order_id = o2.id GROUP BY o2.id) x ON x.id = o.id
          WHERE o.client_id = $cid AND o.status = 'open' AND o.source = 'site'"
     )->fetchColumn();
-    $due = client_due_map($cid)[$cid] ?? 0.0;
+    $sum = client_settle_map($cid)[$cid] ?? ['due' => 0.0, 'client_paid' => 0.0, 'client_profit' => 0.0];
+    $due = $sum['due'];
     json_out([
         'ok' => true,
         'now' => now(),
@@ -57,9 +58,12 @@ function action_me(): never
             'paid_today' => (int) $s['paid_today'],
             'paid_usd' => round((float) $s['paid_usd'], 2),
             'due' => $due,
+            'profit' => $sum['client_profit'],
             'paid_cny' => round((float) $s['paid_cny'], 2),
             'settled' => round($settled, 2),
             'unsettled' => round(max(0, $due - $settled), 2),
+            // 管理员预付、还没用掉的部分
+            'prepaid' => round(max(0, $settled - $due), 2),
             'open_orders' => (int) $open,
             'claimable' => $claimable,
         ],
@@ -72,6 +76,7 @@ function action_me(): never
 const CLIENT_ORDER_FIELDS = "o.id, o.code, o.tier, o.quantity, o.replace_limit, o.replaced, o.status, o.source, o.note, o.created_at, o.done_at,
         o.settle_status, o.settled_amount, o.settled_at, o.unit_price,
         " . DUE_SQL . " AS due_amount,
+        " . DUE_SQL . " - COALESCE(SUM(IF(l.status = 'paid', l.amount_due, 0)), 0) AS profit,
         SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding,
         SUM(l.status IN ('superseded', 'refresh')) AS void,
         COALESCE(SUM(IF(l.status = 'paid', l.amount_due, 0)), 0) AS paid_usd, COALESCE(SUM(IF(l.status = 'paid', l.amount_cny, 0)), 0) AS paid_cny,
@@ -116,7 +121,7 @@ function action_my_orders(): never
         $where[] = 'o.status = ?';
         $args[] = $in['status'];
     }
-    if (in_array($in['settle'] ?? '', ['unsettled', 'partial', 'settled'], true)) {
+    if (in_array($in['settle'] ?? '', ['unsettled', 'partial', 'settled', 'prepaid'], true)) {
         $where[] = 'o.settle_status = ?';
         $args[] = $in['settle'];
     }

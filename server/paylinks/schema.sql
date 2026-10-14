@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS orders (
   status          VARCHAR(16)   NOT NULL DEFAULT 'open',
   -- site 网站派单（客户在网站上领）；offline 线下（TXT / Excel）发出后补建，链接早已在客户手里，不从池子领
   source          VARCHAR(16)   NOT NULL DEFAULT 'site',
-  -- 结算：unsettled / partial / settled；已结金额（USD）。记打款时自动累加，管理员可手动改
+  -- 结算：unsettled 未结 / partial 部分 / settled 已结清 / prepaid 已预付（先付给客户，超过应付）
+  -- 已结金额（USD）。记打款时自动累加，管理员可手动改
   settle_status   VARCHAR(16)   NOT NULL DEFAULT 'unsettled',
   settled_amount  DECIMAL(12,2) NOT NULL DEFAULT 0,
   settled_at      DATETIME      NULL,

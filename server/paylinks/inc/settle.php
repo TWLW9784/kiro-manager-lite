@@ -27,7 +27,7 @@ function admin_order_settle(array $in): never
     $sets = [];
     $args = [];
     if (isset($in['settle_status'])) {
-        if (!in_array($in['settle_status'], ['unsettled', 'partial', 'settled'], true)) fail('结算状态不对');
+        if (!in_array($in['settle_status'], ['unsettled', 'partial', 'settled', 'prepaid'], true)) fail('结算状态不对');
         $sets[] = 'settle_status = ?';
         $args[] = $in['settle_status'];
         $sets[] = "settled_at = IF(? = 'unsettled', NULL, COALESCE(settled_at, ?))";

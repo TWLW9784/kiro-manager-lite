@@ -54,11 +54,25 @@ function onSaved(): void {
 <template>
   <div class="pane">
     <a-card size="small" :title="`待结算（${owed.length} 个客户）`">
+      <template #extra><span class="small muted">应付客户 − 已付客户；先预付的在客户页看余额</span></template>
       <a-table v-if="owed.length" :data-source="owed" :row-key="(r: AdminClient) => r.id" :pagination="false" size="small"
-        :columns="[{ title: '客户', key: 'name' }, { title: '应结', key: 'due', width: 100 }, { title: '已结', key: 'settled', width: 100 }, { title: '未结', key: 'left', width: 100 }, { title: '收款地址', key: 'wallet', width: 260 }, { title: '', key: 'act', width: 170 }]">
+        :columns="[
+          { title: '客户', key: 'name' },
+          { title: '付客户', key: 'due', width: 96 },
+          { title: '客户实付', key: 'client_paid', width: 96 },
+          { title: '客户赚', key: 'client_profit', width: 96 },
+          { title: '已付客户', key: 'settled', width: 96 },
+          { title: '待结算', key: 'left', width: 92 },
+          { title: '收款地址', key: 'wallet', width: 230 },
+          { title: '', key: 'act', width: 170 }
+        ]">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'name'"><b>{{ record.display_name || record.username }}</b></template>
           <template v-else-if="column.key === 'due'">${{ n(record.due).toFixed(2) }}</template>
+          <template v-else-if="column.key === 'client_paid'"><span class="muted">${{ n(record.client_paid).toFixed(2) }}</span></template>
+          <template v-else-if="column.key === 'client_profit'">
+            <b :class="n(record.client_profit) >= 0 ? 'ok' : 'danger'">${{ n(record.client_profit).toFixed(2) }}</b>
+          </template>
           <template v-else-if="column.key === 'settled'"><span class="ok">${{ n(record.settled).toFixed(2) }}</span></template>
           <template v-else-if="column.key === 'left'"><b class="warn">${{ n(record.unsettled).toFixed(2) }}</b></template>
           <template v-else-if="column.key === 'wallet'">
@@ -121,4 +135,5 @@ function onSaved(): void {
 .small { font-size: 12px; }
 .ok { color: #52c41a; }
 .warn { color: #fa8c16; }
+.danger { color: #ff4d4f; }
 </style>

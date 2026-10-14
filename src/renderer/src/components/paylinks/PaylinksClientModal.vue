@@ -123,7 +123,7 @@ async function save(): Promise<void> {
             <a-select v-model:value="timeout" :options="TIMEOUTS" />
           </a-form-item>
         </div>
-        <a-form-item label="默认每条结算单价（USD，可空）" extra="派单时没填单价就用这个；留空 = 按每条实付金额结算">
+        <a-form-item label="默认每条结算单价（USD，可空）" extra="派单时没填单价就用这个；留空 = 按客户实付金额结算">
           <a-input-number v-model:value="unitPrice" :min="0" :max="1000" :precision="2" placeholder="如 5.00" style="width: 100%" />
         </a-form-item>
         <a-divider orientation="left" plain class="divider">收款地址（只支持 Polygon；客户一般自己填，这里可代填）</a-divider>

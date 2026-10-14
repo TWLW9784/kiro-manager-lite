@@ -85,7 +85,8 @@ const columns = [
   { title: '客户', key: 'client', width: 110, ellipsis: true },
   { title: '档位', key: 'tier', width: 100 },
   { title: '进度', key: 'progress', width: 200 },
-  { title: '应结', key: 'due', width: 90 },
+  { title: '付客户', key: 'due', width: 120 },
+  { title: '客户赚', key: 'profit', width: 84 },
   { title: '结算', key: 'settle', width: 110 },
   { title: '状态', key: 'status', width: 80 },
   { title: '创建', key: 'created', width: 96 },
@@ -164,7 +165,16 @@ function onChanged(): void {
         </template>
         <template v-else-if="column.key === 'due'">
           <span class="small">${{ n(record.due_amount).toFixed(2) }}</span>
-          <div v-if="record.unit_price != null" class="muted small">每条 ${{ n(record.unit_price).toFixed(2) }}</div>
+          <div class="muted small">
+            {{ record.unit_price != null ? `${n(record.paid)} × $${n(record.unit_price).toFixed(2)}` : '按实付' }}
+            · 实付 ${{ n(record.paid_usd).toFixed(2) }}
+          </div>
+        </template>
+        <template v-else-if="column.key === 'profit'">
+          <b v-if="record.unit_price != null" :class="n(record.client_profit) >= 0 ? 'ok' : 'danger'" class="small">
+            ${{ n(record.client_profit).toFixed(2) }}
+          </b>
+          <span v-else class="muted">-</span>
         </template>
         <template v-else-if="column.key === 'settle'">
           <a-tag :color="SETTLE_STATUS_META[record.settle_status as keyof typeof SETTLE_STATUS_META]?.color" :bordered="false">
@@ -188,6 +198,7 @@ function onChanged(): void {
 .muted { color: var(--kal-muted); }
 .small { font-size: 12px; }
 .ok { color: #52c41a; }
+.danger { color: #ff4d4f; }
 .code { font-weight: 600; }
 .src { margin-left: 4px; font-size: 11px; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
