@@ -83,7 +83,7 @@ function admin_overview(): never
         'desktop' => meta_get('desktop_sync'),
         'stuck_checking' => $stuck,
         'settle' => [
-            'due' => round((float) $pdo->query("SELECT COALESCE(SUM(amount_due), 0) FROM links WHERE status = 'paid' AND client_id IS NOT NULL")->fetchColumn(), 2),
+            'due' => round(array_sum(client_due_map()), 2),
             'settled' => round((float) $pdo->query("SELECT COALESCE(SUM(settled_amount), 0) FROM orders")->fetchColumn()
                 + (float) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM settlements WHERE order_id IS NULL")->fetchColumn(), 2),
             'unsettled_orders' => (int) $pdo->query("SELECT COUNT(*) FROM orders o WHERE o.settle_status <> 'settled'
@@ -97,7 +97,7 @@ function admin_clients(): never
 {
     $rows = db()->query(
         "SELECT c.id, c.username, c.display_name, c.enabled, c.max_claim, c.claim_timeout_minutes,
-                c.note, c.last_login_at, c.created_at, c.wallet_network, c.wallet_token, c.wallet_address, c.wallet_updated_at,
+                c.note, c.last_login_at, c.created_at, c.wallet_network, c.wallet_token, c.wallet_address, c.wallet_updated_at, c.unit_price,
                 SUM(l.status IN ('claimed', 'checking')) AS claimed,
                 SUM(l.status = 'paid') AS paid,
                 SUM(l.status = 'paid' AND l.paid_at >= CURDATE()) AS paid_today,
@@ -115,9 +115,11 @@ function admin_clients(): never
            UNION ALL SELECT client_id, amount FROM settlements WHERE order_id IS NULL
          ) x GROUP BY client_id"
     ) as $r) $settled[$r['client_id']] = round((float) $r['v'], 2);
+    $due = client_due_map();
     foreach ($rows as &$r) {
+        $r['due'] = $due[$r['id']] ?? 0;
         $r['settled'] = $settled[$r['id']] ?? 0;
-        $r['unsettled'] = round(max(0, (float) $r['paid_usd'] - $r['settled']), 2);
+        $r['unsettled'] = round(max(0, $r['due'] - $r['settled']), 2);
     }
     unset($r);
     json_out(['ok' => true, 'clients' => $rows]);
@@ -140,10 +142,12 @@ function admin_client_save(array $in): never
         'max_claim' => max(1, min(500, (int) ($in['max_claim'] ?? 50))),
         'claim_timeout_minutes' => max(10, min(7 * 24 * 60, (int) ($in['claim_timeout_minutes'] ?? 180))),
         'note' => mb_substr(trim((string) ($in['note'] ?? '')), 0, 255),
+        'unit_price' => unit_price_or_null($in['unit_price'] ?? null),
     ];
     // 收款地址：传了才改（不传保持原样）；格式按网络校验
     if (array_key_exists('wallet_address', $in)) {
-        $network = network_or_default((string) ($in['wallet_network'] ?? 'polygon'));
+        $network = (string) ($in['wallet_network'] ?? 'polygon');
+        if (!network_enabled($network)) fail('只支持 Polygon 网络');
         $token = in_array($in['wallet_token'] ?? '', TOKENS, true) ? $in['wallet_token'] : 'USDT';
         $address = trim((string) $in['wallet_address']);
         if ($address !== '' && !valid_address($network, $address)) fail('收款地址和网络对不上');
@@ -373,6 +377,7 @@ function admin_orders(array $in): never
                 SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding,
                 SUM(l.status IN ('superseded', 'refresh')) AS void,
                 SUM(IF(l.status = 'paid', l.amount_due, 0)) AS paid_usd, SUM(IF(l.status = 'paid', l.amount_cny, 0)) AS paid_cny,
+                " . DUE_SQL . " AS due_amount,
                 (SELECT COUNT(*) FROM settlements s WHERE s.order_id = o.id) AS settlements
          FROM orders o LEFT JOIN clients c ON c.id = o.client_id LEFT JOIN links l ON l.order_id = o.id
          WHERE $sql GROUP BY o.id ORDER BY o.status = 'open' DESC, o.id DESC LIMIT $size OFFSET $offset"
@@ -395,6 +400,11 @@ function admin_order_create(array $in): never
     if (!$ok->fetch()) fail('客户不存在', 404);
     $limit = isset($in['replace_limit']) ? max(0, min(1000, (int) $in['replace_limit'])) : $qty;
     [$id, $code] = insert_order($clientId, $tier, $qty, $limit, (string) ($in['note'] ?? ''));
+    // 结算单价：派单时填了用填的，没填用客户的默认单价；都没有就按实付金额
+    $price = array_key_exists('unit_price', $in) && $in['unit_price'] !== '' && $in['unit_price'] !== null
+        ? unit_price_or_null($in['unit_price'])
+        : unit_price_or_null($pdo->query("SELECT unit_price FROM clients WHERE id = $clientId")->fetchColumn());
+    if ($price !== null) $pdo->prepare('UPDATE orders SET unit_price = ? WHERE id = ?')->execute([$price, $id]);
     json_out(['ok' => true, 'id' => $id, 'code' => $code]);
 }
 

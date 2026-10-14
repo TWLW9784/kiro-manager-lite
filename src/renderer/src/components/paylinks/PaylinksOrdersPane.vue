@@ -104,12 +104,15 @@ function onChanged(): void {
           <div v-if="record.note" class="muted small ellipsis">{{ record.note }}</div>
         </template>
         <template v-else-if="column.key === 'client'">{{ record.client ?? '-' }}</template>
-        <template v-else-if="column.key === 'tier'">{{ record.tier }} × {{ record.quantity }}</template>
+        <template v-else-if="column.key === 'tier'">{{ record.tier }}<div class="muted small">目标 {{ record.quantity }}</div></template>
         <template v-else-if="column.key === 'progress'">
           <a-progress :percent="Math.round((n(record.paid) / Math.max(1, record.quantity)) * 100)" size="small" :show-info="false" />
           <span class="small">已付 <b class="ok">{{ n(record.paid) }}</b> · 待付 {{ n(record.holding) }}<template v-if="n(record.void)"> · 作废 {{ n(record.void) }}</template></span>
         </template>
-        <template v-else-if="column.key === 'due'"><span class="small">${{ n(record.paid_usd).toFixed(2) }}</span></template>
+        <template v-else-if="column.key === 'due'">
+          <span class="small">${{ n(record.due_amount).toFixed(2) }}</span>
+          <div v-if="record.unit_price != null" class="muted small">每条 ${{ n(record.unit_price).toFixed(2) }}</div>
+        </template>
         <template v-else-if="column.key === 'settle'">
           <a-tag :color="SETTLE_STATUS_META[record.settle_status as keyof typeof SETTLE_STATUS_META]?.color" :bordered="false">
             {{ SETTLE_STATUS_META[record.settle_status as keyof typeof SETTLE_STATUS_META]?.text }}

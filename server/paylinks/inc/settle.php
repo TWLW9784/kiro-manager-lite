@@ -6,12 +6,6 @@
 //   settlement_add    记一笔（multipart，带凭证文件；走 action=settlement_add）
 declare(strict_types=1);
 
-/** 批次应结 = 已付款链接实付合计（USD） */
-function order_due(int $orderId): float
-{
-    return (float) db()->query("SELECT COALESCE(SUM(amount_due), 0) FROM links WHERE order_id = $orderId AND status = 'paid'")->fetchColumn();
-}
-
 /** 按结算记录重算批次的已结金额与状态 */
 function recompute_order_settle(int $orderId): void
 {
@@ -44,6 +38,10 @@ function admin_order_settle(array $in): never
         $sets[] = 'settled_amount = ?';
         $args[] = round((float) $in['settled_amount'], 2);
     }
+    if (array_key_exists('unit_price', $in)) {
+        $sets[] = 'unit_price = ?';
+        $args[] = unit_price_or_null($in['unit_price']);
+    }
     if (isset($in['settle_note'])) {
         $sets[] = 'settle_note = ?';
         $args[] = mb_substr(trim((string) $in['settle_note']), 0, 255);
@@ -52,6 +50,11 @@ function admin_order_settle(array $in): never
     $args[] = now();
     $args[] = $id;
     $pdo->prepare('UPDATE orders SET ' . implode(', ', $sets) . ', updated_at = ? WHERE id = ?')->execute($args);
+    // 只改了单价（没手动指定状态）：按新的应结重算状态
+    if (array_key_exists('unit_price', $in) && !isset($in['settle_status'])) {
+        $amt = (float) $pdo->query("SELECT settled_amount FROM orders WHERE id = $id")->fetchColumn();
+        $pdo->prepare('UPDATE orders SET settle_status = ? WHERE id = ?')->execute([settle_status_for(order_due($id), $amt), $id]);
+    }
     json_out(['ok' => true, 'id' => $id]);
 }
 
@@ -111,11 +114,12 @@ function action_settlement_add(): never
     }
     $amount = (float) ($in['amount'] ?? 0);
     if (!is_numeric($in['amount'] ?? null) || $amount <= 0 || $amount > 1e7) fail('金额不对');
-    $network = (string) ($in['network'] ?? '') ?: network_or_default((string) $c['wallet_network']);
-    if (!isset(NETWORKS[$network])) fail('不支持这个网络');
+    // 只走 Polygon；客户以前填的是别的网络时，地址不能默认带过来（同一串地址换网络可能收不到）
+    $network = (string) ($in['network'] ?? '') ?: 'polygon';
+    if (!network_enabled($network)) fail('只支持 Polygon 网络');
     $token = strtoupper((string) ($in['token'] ?? '') ?: (string) $c['wallet_token']);
     if (!in_array($token, TOKENS, true)) fail('不支持这个币种');
-    $to = trim((string) ($in['to_address'] ?? '')) ?: (string) $c['wallet_address'];
+    $to = trim((string) ($in['to_address'] ?? '')) ?: ($c['wallet_network'] === $network ? (string) $c['wallet_address'] : '');
     if ($to !== '' && !valid_address($network, $to)) fail('收款地址和网络对不上');
     $tx = trim((string) ($in['tx_hash'] ?? ''));
     if ($tx !== '' && !valid_tx_hash($network, $tx)) fail('交易哈希格式不对');

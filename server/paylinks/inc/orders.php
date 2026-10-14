@@ -48,7 +48,7 @@ function action_claim(): never
         $order = own_open_order($pdo, (int) $client['id'], $orderId);
         $stats = order_stats($orderId);
         $want = max(1, (int) ($in['count'] ?? $stats['remaining']));
-        $count = min($want, $stats['remaining']);
+        $count = min($want, $stats['remaining'], max(1, (int) $client['max_claim']));
         if ($count <= 0) {
             $pdo->rollBack();
             fail('这个批次的额度已经领完了', 400, 'order_full');

@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS clients (
   wallet_token    VARCHAR(16)   NOT NULL DEFAULT 'USDT',
   wallet_address  VARCHAR(64)   NOT NULL DEFAULT '',
   wallet_updated_at DATETIME    NULL,
+  -- 新批次默认的每条结算单价；空 = 按每条实付金额
+  unit_price      DECIMAL(10,2) NULL,
   last_login_at   DATETIME      NULL,
   last_action_at  DATETIME(3)   NULL,
   created_at      DATETIME      NOT NULL,
@@ -79,6 +81,8 @@ CREATE TABLE IF NOT EXISTS orders (
   settled_amount  DECIMAL(12,2) NOT NULL DEFAULT 0,
   settled_at      DATETIME      NULL,
   settle_note     VARCHAR(255)  NOT NULL DEFAULT '',
+  -- 每条结算单价：应结 = 已付条数 × 单价；空 = 按每条实付金额合计
+  unit_price      DECIMAL(10,2) NULL,
   note            VARCHAR(255)  NOT NULL DEFAULT '',
   created_at      DATETIME      NOT NULL,
   done_at         DATETIME      NULL,

@@ -10,6 +10,7 @@ import {
   NETWORKS,
   TOKENS,
   addSettlement,
+  networkName,
   paylinksAdmin,
   validAddress,
   validTxHash,
@@ -22,7 +23,7 @@ const props = defineProps<{ clients: AdminClient[]; clientId?: number; order?: A
 const emit = defineEmits<{ saved: []; close: [] }>()
 
 const n = (v: string | number | null | undefined): number => Number(v ?? 0)
-const leftOf = (o: AdminOrder): number => Math.max(0, n(o.paid_usd) - n(o.settled_amount))
+const leftOf = (o: AdminOrder): number => Math.max(0, n(o.due_amount) - n(o.settled_amount))
 
 const clientId = ref<number | undefined>(props.order?.client_id ?? props.clientId)
 const orderId = ref<number | undefined>(props.order?.id)
@@ -42,7 +43,7 @@ const clientOptions = computed(() => props.clients.map((c) => ({ value: c.id, la
 const orderOptions = computed(() =>
   orders.value
     .filter((o) => n(o.paid) > 0)
-    .map((o) => ({ value: o.id, label: `${o.code} · 应结 $${n(o.paid_usd).toFixed(2)} · 已结 $${n(o.settled_amount).toFixed(2)}` }))
+    .map((o) => ({ value: o.id, label: `${o.code} · 应结 $${n(o.due_amount).toFixed(2)} · 已结 $${n(o.settled_amount).toFixed(2)}` }))
 )
 const addressOk = computed(() => !address.value || validAddress(network.value, address.value.trim()))
 const txOk = computed(() => !txHash.value || validTxHash(network.value, txHash.value.trim()))
@@ -51,9 +52,10 @@ const txOk = computed(() => !txHash.value || validTxHash(network.value, txHash.v
 async function pickClient(): Promise<void> {
   const c = client.value
   if (!c) return
-  network.value = c.wallet_network || 'polygon'
+  // 只走 Polygon：客户以前填的是别的网络时不带出地址（同一串地址换网络可能收不到）
+  network.value = 'polygon'
   token.value = c.wallet_token || 'USDT'
-  address.value = c.wallet_address || ''
+  address.value = c.wallet_network === 'polygon' ? c.wallet_address || '' : ''
   if (props.order) return
   orderId.value = undefined
   try {
@@ -130,7 +132,7 @@ async function submit(): Promise<void> {
       <a-form-item v-if="!order" label="批次（可不选）" class="span-2">
         <a-select v-model:value="orderId" :options="orderOptions" allow-clear placeholder="不挂批次" />
       </a-form-item>
-      <a-form-item label="金额" required :extra="order ? `应结 $${n(order.paid_usd).toFixed(2)} · 已结 $${n(order.settled_amount).toFixed(2)}` : undefined">
+      <a-form-item label="金额" required :extra="order ? `应结 $${n(order.due_amount).toFixed(2)} · 已结 $${n(order.settled_amount).toFixed(2)}` : undefined">
         <a-input-number v-model:value="amount" :min="0.01" :step="1" :precision="2" style="width: 100%" />
       </a-form-item>
       <a-form-item label="币种">
@@ -145,7 +147,10 @@ async function submit(): Promise<void> {
       <a-form-item label="收款地址" class="span-2" :validate-status="addressOk ? '' : 'error'" :help="addressOk ? undefined : '地址和网络对不上'">
         <a-input v-model:value="address" class="mono" placeholder="0x…" />
         <div class="small hint">
-          <template v-if="client?.wallet_address">
+          <span v-if="client?.wallet_address && client.wallet_network !== 'polygon'" class="danger">
+            客户填的是 {{ networkName(client.wallet_network) }} 地址，不能用；请让客户在门户里重填 Polygon 地址
+          </span>
+          <template v-else-if="client?.wallet_address">
             客户填的地址
             <a-tag v-if="walletFresh(client.wallet_updated_at)" color="red" :bordered="false">24 小时内改过，先跟客户确认</a-tag>
           </template>
@@ -173,4 +178,5 @@ async function submit(): Promise<void> {
 .small { font-size: 12px; }
 .hint { margin-top: 4px; color: var(--kal-muted); }
 .warn { color: #faad14; }
+.danger { color: #ff4d4f; }
 </style>

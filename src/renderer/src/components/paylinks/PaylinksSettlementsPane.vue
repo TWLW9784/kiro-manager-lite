@@ -55,7 +55,7 @@ function onSaved(): void {
         :columns="[{ title: '客户', key: 'name' }, { title: '应结', key: 'due', width: 100 }, { title: '已结', key: 'settled', width: 100 }, { title: '未结', key: 'left', width: 100 }, { title: '收款地址', key: 'wallet', width: 260 }, { title: '', key: 'act', width: 170 }]">
         <template #bodyCell="{ column, record }">
           <template v-if="column.key === 'name'"><b>{{ record.display_name || record.username }}</b></template>
-          <template v-else-if="column.key === 'due'">${{ n(record.paid_usd).toFixed(2) }}</template>
+          <template v-else-if="column.key === 'due'">${{ n(record.due).toFixed(2) }}</template>
           <template v-else-if="column.key === 'settled'"><span class="ok">${{ n(record.settled).toFixed(2) }}</span></template>
           <template v-else-if="column.key === 'left'"><b class="warn">${{ n(record.unsettled).toFixed(2) }}</b></template>
           <template v-else-if="column.key === 'wallet'">
@@ -64,7 +64,8 @@ function onSaved(): void {
               <div>
                 <a-tooltip :title="record.wallet_address"><span class="mono">{{ shortAddr(record.wallet_address) }}</span></a-tooltip>
                 <a-button type="link" size="small" @click="copyText(record.wallet_address, '已复制地址')"><template #icon><CopyOutlined /></template></a-button>
-                <a-tag v-if="walletFresh(record.wallet_updated_at)" color="red" :bordered="false">24h 内改过</a-tag>
+                <a-tag v-if="record.wallet_network !== 'polygon'" color="red" :bordered="false">不是 Polygon，让客户重填</a-tag>
+                <a-tag v-else-if="walletFresh(record.wallet_updated_at)" color="red" :bordered="false">24h 内改过</a-tag>
               </div>
             </template>
             <a-tag v-else color="orange" :bordered="false">未设置</a-tag>

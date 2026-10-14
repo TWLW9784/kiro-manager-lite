@@ -15,10 +15,10 @@ const tt = (k, p) => ZH[k](p || {})
 const A = {
   view: 'overview',
   clients: [],
-  networks: [
-    { id: 'polygon', name: 'Polygon' }, { id: 'ethereum', name: 'Ethereum' }, { id: 'bsc', name: 'BNB Chain' },
-    { id: 'arbitrum', name: 'Arbitrum' }, { id: 'tron', name: 'Tron' }
-  ],
+  /** 可选的收款网络：只有 Polygon */
+  networks: [{ id: 'polygon', name: 'Polygon' }],
+  /** 历史记录里可能出现的网络名 */
+  networkNames: { polygon: 'Polygon', ethereum: 'Ethereum', bsc: 'BNB Chain', arbitrum: 'Arbitrum', tron: 'Tron' },
   tokens: ['USDT', 'USDC'],
   orders: { page: 1, size: 20, status: 'open', settle: '', client_id: '', q: '' },
   drawer: null
@@ -33,7 +33,7 @@ const LINK = {
 }
 const badge = (map, k) => `<span class="badge ${map[k]?.[0] ?? ''}">${esc(map[k]?.[1] ?? k)}</span>`
 const sourceTag = (o) => (o.source === 'offline' ? '<span class="badge plain" title="线下（TXT / Excel）发出后补建：不从池子领、不自动补">线下</span>' : '')
-const netName = (id) => A.networks.find((n) => n.id === id)?.name || id
+const netName = (id) => A.networkNames[id] || id
 const empty = (title, hint = '') => `<div class="empty"><b>${esc(title)}</b>${esc(hint)}</div>`
 const progress = (paid, qty) => {
   const pct = Math.min(100, Math.round((num(paid) / Math.max(1, num(qty))) * 100))
@@ -45,6 +45,7 @@ function walletCell(c) {
   if (!c.wallet_address) return '<span class="badge warn">未设置</span>'
   return `<span class="small text-2">${esc(netName(c.wallet_network))} · ${esc(c.wallet_token)}</span>
     <div class="mono" title="${esc(c.wallet_address)}">${esc(short(c.wallet_address, 8, 6))}</div>
+    ${c.wallet_network !== 'polygon' ? '<span class="badge danger">不是 Polygon，让客户重填</span>' : ''}
     ${walletFresh(c) ? `<span class="badge danger" title="${esc(c.wallet_updated_at)}">24 小时内改过</span>` : ''}`
 }
 const clientOptions = (sel, { all = '全部客户' } = {}) =>
@@ -91,7 +92,7 @@ async function viewOverview() {
           <td data-label="客户"><b>${esc(c.display_name || c.username)}</b><div class="small muted">${esc(c.username)}</div></td>
           <td data-label="待付" class="right num">${num(c.claimed)}</td>
           <td data-label="已付" class="right num">${num(c.paid)}<div class="small muted">今日 ${num(c.paid_today)}</div></td>
-          <td data-label="应结" class="right num">${usd(c.paid_usd)}</td>
+          <td data-label="应结" class="right num">${usd(c.due)}</td>
           <td data-label="已结" class="right num ok">${usd(c.settled)}</td>
           <td data-label="未结" class="right num ${num(c.unsettled) > 0 ? 'warn' : ''}"><b>${usd(c.unsettled)}</b></td>
           <td data-label="收款地址">${walletCell(c)}</td>
@@ -132,7 +133,7 @@ async function viewOrders() {
         <td data-label="客户">${esc(o.client || '-')}</td>
         <td data-label="档位">${esc(o.tier)} × ${o.quantity}</td>
         <td data-label="进度">${progress(o.paid, o.quantity)}<span class="small text-2">已付 ${num(o.paid)} · 待付 ${num(o.holding)}${num(o.void) ? ` · 作废 ${num(o.void)}` : ''}</span></td>
-        <td data-label="应结" class="right num">${usd(o.paid_usd)}</td>
+        <td data-label="应结" class="right num">${usd(o.due_amount)}${o.unit_price !== null ? `<div class="small muted">每条 ${usd(o.unit_price)}</div>` : ''}</td>
         <td data-label="结算">${badge(SETTLE, o.settle_status)}${num(o.settled_amount) ? `<div class="small muted num">${usd(o.settled_amount)}</div>` : ''}</td>
         <td data-label="状态">${badge(ORDER, o.status)}</td>
         <td data-label="创建" class="small text-2">${dt(o.created_at)}</td>
@@ -147,16 +148,18 @@ function newOrderModal() {
   const m = modal('派单', `<form class="form-grid" id="new-order">
       <label class="field span-2"><span>客户</span><select name="client_id" required>${clientOptions('', { all: '' })}</select></label>
       <label class="field"><span>档位</span><select name="tier">${['pro', 'pro+', 'promax', 'power'].map((t) => `<option ${t === 'pro+' ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-      <label class="field"><span>数量</span><input name="quantity" type="number" min="1" max="500" value="10" required></label>
+      <label class="field"><span>目标付款数</span><input name="quantity" type="number" min="1" max="500" value="10" required></label>
+      <label class="field"><span>每条结算单价（可空）</span><input name="unit_price" type="number" step="0.01" min="0" placeholder="空 = 客户默认 / 按实付"></label>
       <label class="field"><span>可更换次数</span><input name="replace_limit" type="number" min="0" max="1000" placeholder="默认 = 数量"></label>
       <label class="field"><span>备注</span><input name="note" maxlength="255"></label>
-    </form><p class="small muted" style="margin:0">客户在网站上按额度领取；池子不够时开着的桌面端会自动提取。</p>`, {
+    </form><p class="small muted" style="margin:0">按实际付款的条数结算：客户可以多次领取，已付 + 手里待付不超过目标；超时没付的自动收回换新，不占名额。池子不够时开着的桌面端会自动提取。</p>`, {
     foot: '<button class="btn" data-close>取消</button><button class="btn primary" data-submit>派单</button>'
   })
   m.el.querySelector('[data-submit]').addEventListener('click', () => {
     const f = new FormData(m.el.querySelector('form'))
     guard(async () => {
       const body = { client_id: Number(f.get('client_id')), tier: f.get('tier'), quantity: Number(f.get('quantity')), note: f.get('note') }
+      if (f.get('unit_price') !== '') body.unit_price = Number(f.get('unit_price'))
       if (f.get('replace_limit') !== '') body.replace_limit = Number(f.get('replace_limit'))
       const r = await adm('order_create', body)
       toast(`已派单 ${r.code}`, 'ok')
@@ -180,7 +183,7 @@ async function openOrder(id) {
   const state = { lf: 'all' }
   const render = () => {
     const { o } = d
-    const due = num(o.paid_usd)
+    const due = num(o.due_amount)
     const left = Math.max(0, due - num(o.settled_amount))
     const links = state.lf === 'all' ? d.links : d.links.filter((l) => l.status === state.lf)
     const cnt = (s) => d.links.filter((l) => l.status === s).length
@@ -189,7 +192,8 @@ async function openOrder(id) {
       <div class="stats">
         <div class="card stat accent-ok"><span class="stat-label">已付</span><span class="stat-value">${num(o.paid)} / ${o.quantity}</span>${progress(o.paid, o.quantity)}</div>
         <div class="card stat accent-warn"><span class="stat-label">待付</span><span class="stat-value">${num(o.holding)}</span><span class="stat-sub">${num(o.void) ? `作废 ${num(o.void)}` : '&nbsp;'}</span></div>
-        <div class="card stat"><span class="stat-label">应结</span><span class="stat-value">${usd(due)}</span><span class="stat-sub">≈ ${cny(o.paid_cny)}</span></div>
+        <div class="card stat"><span class="stat-label">应结</span><span class="stat-value">${usd(due)}</span>
+          <span class="stat-sub">${o.unit_price !== null ? `已付 ${num(o.paid)} 条 × ${usd(o.unit_price)}` : `按实付合计 · ≈ ${cny(o.paid_cny)}`}</span></div>
         <div class="card stat accent-primary"><span class="stat-label">已结</span><span class="stat-value">${usd(o.settled_amount)}</span>
           <span class="stat-sub">${badge(SETTLE, o.settle_status)} ${left > 0.004 ? `还差 ${usd(left)}` : ''}</span></div>
       </div>
@@ -205,6 +209,7 @@ async function openOrder(id) {
         <form class="card" id="settle-form"><div class="card-head"><h2>结算状态</h2></div><div class="card-body form-grid">
           <label class="field"><span>状态</span><select name="settle_status">${Object.entries(SETTLE).map(([k, [, l]]) => `<option value="${k}" ${o.settle_status === k ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
           <label class="field"><span>已结金额（USD）</span><input name="settled_amount" type="number" step="0.01" min="0" value="${num(o.settled_amount).toFixed(2)}"></label>
+          <label class="field span-2"><span>每条结算单价（留空 = 按每条实付金额）</span><input name="unit_price" type="number" step="0.01" min="0" value="${o.unit_price ?? ''}" placeholder="如 5.00：应结 = 已付条数 × 5.00"></label>
           <label class="field span-2"><span>结算备注</span><input name="settle_note" maxlength="255" value="${esc(o.settle_note || '')}" placeholder="如：按 1:1 结算，扣手续费 1 USDT"></label>
           <div class="span-2 btn-group"><button class="btn primary">保存结算状态</button><span class="small muted">记一笔打款会自动累加已结金额并更新状态；这里可以手动改</span></div>
         </div></form>
@@ -226,7 +231,7 @@ async function openOrder(id) {
       </div>
       ${o.status === 'open' ? `<div class="card"><div class="card-head"><h2>批次操作</h2></div><div class="card-body btn-group">
         <button class="btn" data-oa="done">标记完成</button>
-        <button class="btn" data-oa="qty">改数量（${o.quantity}）</button>
+        <button class="btn" data-oa="qty">改目标付款数（${o.quantity}）</button>
         ${o.source === 'offline' ? '' : `<button class="btn" data-oa="limit">改更换次数（${o.replaced}/${o.replace_limit}）</button>`}
         <button class="btn danger" data-oa="cancel">取消批次</button>
       </div></div>` : ''}`
@@ -240,7 +245,7 @@ async function openOrder(id) {
       e.preventDefault()
       const f = new FormData(e.currentTarget)
       guard(async () => {
-        await adm('order_settle', { id: Number(id), settle_status: f.get('settle_status'), settled_amount: Number(f.get('settled_amount')), settle_note: f.get('settle_note') })
+        await adm('order_settle', { id: Number(id), settle_status: f.get('settle_status'), settled_amount: Number(f.get('settled_amount')), settle_note: f.get('settle_note'), unit_price: f.get('unit_price') })
         toast('结算状态已保存', 'ok')
         await refresh()
       })
@@ -282,7 +287,7 @@ async function orderAction(act, o, after) {
   }
   const isQty = act === 'qty'
   const min = isQty ? Math.max(1, num(o.paid) + num(o.holding)) : 0
-  const m = modal(isQty ? '改数量' : '改更换次数', `<label class="field"><span>${isQty ? `数量（不能少于已付 + 待付 = ${min}）` : '可更换次数'}</span>
+  const m = modal(isQty ? '改数量' : '改更换次数', `<label class="field"><span>${isQty ? `目标付款数（不能少于已付 + 待付 = ${min}）` : '可更换次数'}</span>
       <input type="number" min="${min}" max="1000" value="${isQty ? o.quantity : o.replace_limit}" autofocus></label>`, {
     foot: '<button class="btn" data-close>取消</button><button class="btn primary" data-ok>保存</button>'
   })
@@ -300,12 +305,12 @@ async function orderAction(act, o, after) {
 async function settleModal({ client_id = '', order = null, onDone }) {
   if (!A.clients.length) await loadClients()
   const now = new Date(Date.now() - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 16)
-  const left = order ? Math.max(0, num(order.paid_usd) - num(order.settled_amount)) : 0
+  const left = order ? Math.max(0, num(order.due_amount) - num(order.settled_amount)) : 0
   const m = modal(order ? `记一笔打款 · ${esc(order.code)}` : '记一笔打款', `<form id="settle-add" class="form-grid">
       <label class="field span-2"><span>客户</span><select name="client_id" required ${order ? 'disabled' : ''}>${clientOptions(client_id, { all: '' })}</select></label>
       ${order ? '' : '<label class="field span-2"><span>批次（可不选）</span><select name="order_id"><option value="">不挂批次</option></select></label>'}
       <label class="field"><span>金额</span><input name="amount" type="number" step="0.01" min="0.01" value="${left ? left.toFixed(2) : ''}" required autofocus>
-        ${order ? `<span class="hint">应结 ${usd(order.paid_usd)}，已结 ${usd(order.settled_amount)}</span>` : ''}</label>
+        ${order ? `<span class="hint">应结 ${usd(order.due_amount)}，已结 ${usd(order.settled_amount)}</span>` : ''}</label>
       <label class="field"><span>币种</span><select name="token">${A.tokens.map((t) => `<option>${t}</option>`).join('')}</select></label>
       <label class="field"><span>网络</span><select name="network">${A.networks.map((n) => `<option value="${n.id}">${n.name}</option>`).join('')}</select></label>
       <label class="field"><span>打款时间</span><input name="paid_at" type="datetime-local" value="${now}"></label>
@@ -321,16 +326,20 @@ async function settleModal({ client_id = '', order = null, onDone }) {
   const fill = async () => {
     const c = A.clients.find((x) => String(x.id) === String(F('client_id').value))
     if (!c) return
-    F('network').value = c.wallet_network || 'polygon'
+    // 只走 Polygon：客户以前填的是别的网络时不带出地址（同一串地址换网络可能收不到）
+    const polygon = c.wallet_network === 'polygon'
+    F('network').value = 'polygon'
     F('token').value = c.wallet_token || 'USDT'
-    F('to_address').value = c.wallet_address || ''
-    m.el.querySelector('#addr-note').innerHTML = c.wallet_address
-      ? `客户填的地址${walletFresh(c) ? ' <span class="badge danger">24 小时内改过，先跟客户确认</span>' : ''}`
-      : '<span class="warn">客户还没填收款地址，请手动填写</span>'
+    F('to_address').value = polygon ? c.wallet_address || '' : ''
+    m.el.querySelector('#addr-note').innerHTML = !c.wallet_address
+      ? '<span class="warn">客户还没填收款地址，请手动填写</span>'
+      : !polygon
+        ? `<span class="danger">客户填的是 ${esc(netName(c.wallet_network))} 地址，不能用；请让客户在门户里重填 Polygon 地址</span>`
+        : `客户填的地址${walletFresh(c) ? ' <span class="badge danger">24 小时内改过，先跟客户确认</span>' : ''}`
     if (!order && F('order_id')) {
       const r = await adm('orders', { client_id: c.id, page: 1, page_size: 100 })
       F('order_id').innerHTML = `<option value="">不挂批次</option>${r.orders.filter((o) => num(o.paid)).map((o) =>
-        `<option value="${o.id}" data-left="${Math.max(0, num(o.paid_usd) - num(o.settled_amount)).toFixed(2)}">${esc(o.code)} · 应结 ${usd(o.paid_usd)} · 已结 ${usd(o.settled_amount)}</option>`).join('')}`
+        `<option value="${o.id}" data-left="${Math.max(0, num(o.due_amount) - num(o.settled_amount)).toFixed(2)}">${esc(o.code)} · 应结 ${usd(o.due_amount)} · 已结 ${usd(o.settled_amount)}</option>`).join('')}`
     }
   }
   F('client_id').addEventListener('change', fill)

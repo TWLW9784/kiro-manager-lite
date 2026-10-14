@@ -8,7 +8,7 @@ header('Cache-Control: no-store');
 header('Referrer-Policy: same-origin');
 $authed = admin_session_ok();
 $csrf = $authed ? ($_SESSION['admin_csrf'] ?? '') : '';
-$v = '12';
+$v = '13';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>
@@ -51,7 +51,7 @@ document.getElementById('login').addEventListener('submit', async (e) => {
 <?php else: ?>
 <div class="shell" data-csrf="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
   <aside class="sidebar">
-    <div class="brand"><div class="brand-mark">P</div><div><b>管理后台</b><span>Payment links</span></div></div>
+    <div class="brand"><div class="brand-mark">P</div><div><b>管理后台</b><span>Payment links</span></div><button class="btn ghost close-btn sidebar-close" aria-label="关闭菜单">✕</button></div>
     <nav class="nav" aria-label="主导航">
       <button class="nav-item" data-view="overview"><span class="nav-ico">◧</span>总览</button>
       <button class="nav-item" data-view="orders"><span class="nav-ico">▤</span>批次<span class="count" id="nav-orders"></span></button>

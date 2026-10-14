@@ -1,5 +1,8 @@
 <script setup lang="ts">
-/** 派单：给客户开一个批次（档位 × 数量）。池子不够时桌面端会按缺口自动提取 */
+/**
+ * 派单：给客户开一个批次（档位 × 目标付款数）。按实际付款的条数结算：客户可以多次领取，
+ * 已付 + 手里待付不超过目标；超时没付的自动收回换新、不占名额。池子不够时桌面端会按缺口自动提取。
+ */
 import { ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { FileAddOutlined } from '@ant-design/icons-vue'
@@ -13,6 +16,8 @@ const tier = ref('pro+')
 const quantity = ref(10)
 const replaceLimit = ref<number | null>(null)
 const note = ref('')
+/** 每条结算单价；空 = 用客户的默认单价，客户也没有就按实付金额 */
+const unitPrice = ref<number | null>(null)
 const saving = ref(false)
 
 async function save(): Promise<void> {
@@ -24,7 +29,8 @@ async function save(): Promise<void> {
       tier: tier.value,
       quantity: Number(quantity.value),
       replace_limit: replaceLimit.value ?? undefined,
-      note: note.value.trim()
+      note: note.value.trim(),
+      unit_price: unitPrice.value ?? undefined
     })
     message.success(`已派单 ${res.code}，池子不够的会自动提取`)
     emit('saved')
@@ -51,11 +57,14 @@ async function save(): Promise<void> {
         <a-form-item label="档位" required>
           <a-select v-model:value="tier" :options="['pro', 'pro+', 'promax', 'power'].map((v) => ({ value: v, label: v }))" />
         </a-form-item>
-        <a-form-item label="数量" required>
+        <a-form-item label="目标付款数" required>
           <a-input-number v-model:value="quantity" :min="1" :max="500" :precision="0" addon-after="条" style="width: 100%" />
         </a-form-item>
       </div>
-      <a-form-item label="可更换次数" extra="留空 = 和数量一样多。客户点「更换」不占额度，但不能超过这个次数">
+      <a-form-item label="每条结算单价（USD，可空）" extra="填了：应结 = 已付条数 × 单价；留空用客户的默认单价，客户也没设就按每条实付金额">
+        <a-input-number v-model:value="unitPrice" :min="0" :max="1000" :precision="2" placeholder="如 5.00" style="width: 100%" />
+      </a-form-item>
+      <a-form-item label="可更换次数" extra="留空 = 和目标付款数一样多。客户点「更换」不占名额，但不能超过这个次数">
         <a-input-number v-model:value="replaceLimit" :min="0" :max="1000" :precision="0" placeholder="默认等于数量" style="width: 100%" />
       </a-form-item>
       <a-form-item label="备注（客户能看到）">

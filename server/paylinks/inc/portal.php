@@ -26,25 +26,30 @@ function action_me(): never
     $settled = (float) $pdo->query("SELECT COALESCE(SUM(settled_amount), 0) FROM orders WHERE client_id = $cid")->fetchColumn()
         + (float) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM settlements WHERE client_id = $cid AND order_id IS NULL")->fetchColumn();
     $open = $pdo->query("SELECT COUNT(*) FROM orders WHERE client_id = $cid AND status = 'open'")->fetchColumn();
-    $due = round((float) $s['paid_usd'], 2);
+    $due = client_due_map($cid)[$cid] ?? 0.0;
     json_out([
         'ok' => true,
         'now' => now(),
         'client' => [
             'username' => $client['username'],
             'display_name' => $client['display_name'],
-            'wallet_network' => network_or_default((string) $client['wallet_network']),
+            // 原样给出（可能是以前选的其他网络），前端据此提示改成 Polygon
+            'wallet_network' => (string) $client['wallet_network'],
+            'wallet_network_name' => NETWORKS[$client['wallet_network']]['name'] ?? $client['wallet_network'],
+            'wallet_network_ok' => network_enabled((string) $client['wallet_network']),
             'wallet_token' => in_array($client['wallet_token'], TOKENS, true) ? $client['wallet_token'] : 'USDT',
             'wallet_address' => $client['wallet_address'],
             'wallet_updated_at' => $client['wallet_updated_at'],
         ],
         'timeout_minutes' => (int) $client['claim_timeout_minutes'],
+        'max_claim' => (int) $client['max_claim'],
         'stats' => [
             'claimed' => (int) $s['claimed'],
             'checking' => (int) $s['checking'],
             'paid' => (int) $s['paid'],
             'paid_today' => (int) $s['paid_today'],
-            'paid_usd' => $due,
+            'paid_usd' => round((float) $s['paid_usd'], 2),
+            'due' => $due,
             'paid_cny' => round((float) $s['paid_cny'], 2),
             'settled' => round($settled, 2),
             'unsettled' => round(max(0, $due - $settled), 2),
@@ -57,7 +62,8 @@ function action_me(): never
 
 /** 客户看得到的批次字段（含进度与已付金额）；FROM orders o LEFT JOIN links l */
 const CLIENT_ORDER_FIELDS = "o.id, o.code, o.tier, o.quantity, o.replace_limit, o.replaced, o.status, o.source, o.note, o.created_at, o.done_at,
-        o.settle_status, o.settled_amount, o.settled_at,
+        o.settle_status, o.settled_amount, o.settled_at, o.unit_price,
+        " . DUE_SQL . " AS due_amount,
         SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding,
         SUM(l.status IN ('superseded', 'refresh')) AS void,
         COALESCE(SUM(IF(l.status = 'paid', l.amount_due, 0)), 0) AS paid_usd, COALESCE(SUM(IF(l.status = 'paid', l.amount_cny, 0)), 0) AS paid_cny,
@@ -231,7 +237,7 @@ function action_wallet_save(): never
     $network = (string) ($in['network'] ?? 'polygon');
     $token = strtoupper((string) ($in['token'] ?? 'USDT'));
     $address = trim((string) ($in['address'] ?? ''));
-    if (!isset(NETWORKS[$network])) fail('不支持这个网络', 400, 'bad_network');
+    if (!network_enabled($network)) fail('不支持这个网络', 400, 'bad_network');
     if (!in_array($token, TOKENS, true)) fail('不支持这个币种', 400, 'bad_token');
     if (!valid_address($network, $address)) fail('收款地址格式不对，请核对网络与地址', 400, 'bad_address');
     $t = now();

@@ -8,7 +8,7 @@ header('Cache-Control: no-store');
 header('Referrer-Policy: same-origin');
 $authed = logged_in();
 $csrf = $authed ? csrf_token() : '';
-$v = '12';
+$v = '13';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>
@@ -36,11 +36,11 @@ $v = '12';
 <?php else: ?>
 <div class="shell" data-csrf="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
   <aside class="sidebar">
-    <div class="brand"><div class="brand-mark">P</div><div><b data-i18n="title">支付链接</b><span data-i18n="portal_sub">客户门户</span></div></div>
+    <div class="brand"><div class="brand-mark">P</div><div><b data-i18n="title">支付链接</b><span data-i18n="portal_sub">客户门户</span></div>
+      <button class="btn ghost close-btn sidebar-close" data-i18n-label="close_menu" aria-label="关闭菜单">✕</button></div>
     <nav class="nav" aria-label="Main">
-      <button class="nav-item" data-view="overview"><span class="nav-ico">◧</span><span data-i18n="nav_overview">概览</span></button>
+      <button class="nav-item" data-view="work"><span class="nav-ico">⚡</span><span data-i18n="nav_work">付款工作台</span><span class="count" id="nav-pending"></span></button>
       <button class="nav-item" data-view="orders"><span class="nav-ico">▤</span><span data-i18n="nav_orders">我的批次</span><span class="count" id="nav-orders"></span></button>
-      <button class="nav-item" data-view="pending"><span class="nav-ico">⧗</span><span data-i18n="nav_pending">待付款</span><span class="count" id="nav-pending"></span></button>
       <button class="nav-item" data-view="paid"><span class="nav-ico">✓</span><span data-i18n="nav_paid">已付款</span></button>
       <button class="nav-item" data-view="settlements"><span class="nav-ico">⇄</span><span data-i18n="nav_settlements">结算记录</span></button>
       <button class="nav-item" data-view="wallet"><span class="nav-ico">◎</span><span data-i18n="nav_wallet">收款设置</span></button>
@@ -52,14 +52,13 @@ $v = '12';
   </aside>
   <div class="main">
     <header class="topbar">
-      <button class="btn ghost menu-btn" aria-label="Menu">☰</button>
+      <button class="btn ghost menu-btn" data-i18n-label="open_menu" aria-label="Menu">☰</button>
       <h1 id="page-title"></h1>
       <span class="muted small" data-i18n="auto_refresh_s">自动刷新</span>
     </header>
     <main class="content">
-      <section data-section="overview" hidden></section>
+      <section data-section="work" hidden></section>
       <section data-section="orders" hidden></section>
-      <section data-section="pending" hidden></section>
       <section data-section="paid" hidden></section>
       <section data-section="settlements" hidden></section>
       <section data-section="wallet" hidden></section>

@@ -33,7 +33,7 @@ const settlements = ref<AdminSettlement[]>([])
 const loading = ref(false)
 const filter = ref<string>('all')
 const settling = ref(false)
-const form = ref<{ settle_status: SettleStatus; settled_amount: number; settle_note: string }>({ settle_status: 'unsettled', settled_amount: 0, settle_note: '' })
+const form = ref<{ settle_status: SettleStatus; settled_amount: number; settle_note: string; unit_price: number | null }>({ settle_status: 'unsettled', settled_amount: 0, settle_note: '', unit_price: null })
 const savingSettle = ref(false)
 
 const n = (v: string | number | null | undefined): number => Number(v ?? 0)
@@ -53,7 +53,7 @@ async function load(): Promise<void> {
     const rank: Record<string, number> = { claimed: 0, checking: 1, paid: 2, refresh: 3, superseded: 4 }
     links.value = l.links.sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || a.id - b.id)
     settlements.value = s.settlements
-    form.value = { settle_status: o.settle_status, settled_amount: n(o.settled_amount), settle_note: o.settle_note || '' }
+    form.value = { settle_status: o.settle_status, settled_amount: n(o.settled_amount), settle_note: o.settle_note || '', unit_price: o.unit_price != null ? Number(o.unit_price) : null }
   } catch (e) {
     message.error(e instanceof Error ? e.message : String(e))
   } finally {
@@ -70,14 +70,14 @@ async function reload(): Promise<void> {
 const count = (s: string): number => links.value.filter((l) => l.status === s).length
 const shown = computed(() => (filter.value === 'all' ? links.value : links.value.filter((l) => l.status === filter.value)))
 const unpaid = computed(() => links.value.filter((l) => l.status === 'claimed'))
-const left = computed(() => Math.max(0, n(order.value?.paid_usd) - n(order.value?.settled_amount)))
+const left = computed(() => Math.max(0, n(order.value?.due_amount) - n(order.value?.settled_amount)))
 const pct = computed(() => Math.min(100, Math.round((n(order.value?.paid) / Math.max(1, n(order.value?.quantity))) * 100)))
 
 async function saveSettle(): Promise<void> {
   if (!order.value) return
   savingSettle.value = true
   try {
-    await paylinksAdmin.settleOrder({ id: order.value.id, ...form.value })
+    await paylinksAdmin.settleOrder({ id: order.value.id, ...form.value, unit_price: form.value.unit_price ?? '' })
     message.success('结算状态已保存')
     await reload()
   } catch (e) {
@@ -158,14 +158,15 @@ async function changeQty(): Promise<void> {
         <div class="stats">
           <a-card size="small"><div class="label">已付</div><div class="value ok">{{ n(order.paid) }} / {{ order.quantity }}</div><a-progress :percent="pct" size="small" :show-info="false" /></a-card>
           <a-card size="small"><div class="label">待付</div><div class="value warn">{{ n(order.holding) }}</div><div class="sub">{{ n(order.void) ? `作废 ${n(order.void)}` : ' ' }}</div></a-card>
-          <a-card size="small"><div class="label">应结</div><div class="value">{{ usd(order.paid_usd) }}</div><div class="sub">≈ ¥{{ n(order.paid_cny).toFixed(2) }}</div></a-card>
+          <a-card size="small"><div class="label">应结</div><div class="value">{{ usd(order.due_amount) }}</div>
+            <div class="sub">{{ order.unit_price != null ? `已付 ${n(order.paid)} 条 × ${usd(order.unit_price)}` : `按实付合计 · ≈ ¥${n(order.paid_cny).toFixed(2)}` }}</div></a-card>
           <a-card size="small"><div class="label">已结</div><div class="value primary">{{ usd(order.settled_amount) }}</div>
             <div class="sub"><a-tag :color="SETTLE_STATUS_META[order.settle_status].color" :bordered="false">{{ SETTLE_STATUS_META[order.settle_status].text }}</a-tag><template v-if="left > 0.004">还差 {{ usd(left) }}</template></div></a-card>
         </div>
 
         <div class="two">
           <a-card size="small" title="客户收款地址">
-            <a-descriptions v-if="order.wallet_address" :column="1" size="small">
+            <a-descriptions v-if="order.wallet_address && order.wallet_network === 'polygon'" :column="1" size="small">
               <a-descriptions-item label="网络 / 币种">{{ networkName(order.wallet_network) }} · {{ order.wallet_token }}</a-descriptions-item>
               <a-descriptions-item label="地址">
                 <span class="mono addr">{{ order.wallet_address }}</span>
@@ -176,7 +177,9 @@ async function changeQty(): Promise<void> {
                 <a-tag v-if="walletFresh(order.wallet_updated_at)" color="red" :bordered="false">24 小时内改过，先跟客户确认</a-tag>
               </a-descriptions-item>
             </a-descriptions>
-            <a-alert v-else type="warning" show-icon message="客户还没设置收款地址" description="让客户在门户「收款设置」里填，或在客户列表里代填。" />
+            <a-alert v-if="order.wallet_address && order.wallet_network !== 'polygon'" type="error" show-icon class="gap"
+              :message="`客户填的是 ${networkName(order.wallet_network)} 地址，现在只支持 Polygon`" description="请让客户在门户「收款设置」里重填 Polygon 地址，别往这个地址打款。" />
+            <a-alert v-if="!order.wallet_address" type="warning" show-icon message="客户还没设置收款地址" description="让客户在门户「收款设置」里填，或在客户列表里代填。" />
           </a-card>
           <a-card size="small" title="结算状态">
             <a-form layout="vertical" class="settle-form">
@@ -185,6 +188,9 @@ async function changeQty(): Promise<void> {
               </a-form-item>
               <a-form-item label="已结金额（USD）">
                 <a-input-number v-model:value="form.settled_amount" :min="0" :precision="2" style="width: 100%" />
+              </a-form-item>
+              <a-form-item label="每条结算单价（留空 = 按实付）" class="span-2">
+                <a-input-number v-model:value="form.unit_price" :min="0" :max="1000" :precision="2" placeholder="如 5.00：应结 = 已付条数 × 5.00" style="width: 100%" />
               </a-form-item>
               <a-form-item label="结算备注" class="span-2">
                 <a-input v-model:value="form.settle_note" :maxlength="255" placeholder="如：按 1:1 结算，扣手续费 1 USDT" />
@@ -240,8 +246,8 @@ async function changeQty(): Promise<void> {
         <a-card v-if="order.status === 'open'" size="small" title="批次操作">
           <a-space wrap>
             <a-button @click="finish">标记完成</a-button>
-            <a-input-number v-model:value="qty" :min="1" :max="1000" :placeholder="`数量 ${order.quantity}`" style="width: 120px" />
-            <a-button :disabled="!qty" @click="changeQty">改数量</a-button>
+            <a-input-number v-model:value="qty" :min="1" :max="1000" :placeholder="`目标 ${order.quantity}`" style="width: 120px" />
+            <a-button :disabled="!qty" @click="changeQty">改目标付款数</a-button>
             <a-button danger @click="cancel">取消批次</a-button>
           </a-space>
         </a-card>

@@ -7,7 +7,7 @@ import { computed, ref } from 'vue'
 import { message } from 'ant-design-vue'
 import { CopyOutlined, ReloadOutlined, UserOutlined } from '@ant-design/icons-vue'
 import { copyText } from '@/utils/ui'
-import { NETWORKS, TOKENS, paylinksAdmin, randomPassword, validAddress, type AdminClient } from '@/utils/paylinksAdmin'
+import { NETWORKS, TOKENS, networkName, paylinksAdmin, randomPassword, validAddress, type AdminClient } from '@/utils/paylinksAdmin'
 
 const props = defineProps<{ client: AdminClient | null; siteUrl: string }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -21,9 +21,13 @@ const maxClaim = ref(props.client?.max_claim ?? 50)
 const timeout = ref(props.client?.claim_timeout_minutes ?? 180)
 const note = ref(props.client?.note ?? '')
 // 收款地址：客户自己在门户里填（要输密码）；客户在群里发过来时可以代填
-const walletNetwork = ref(props.client?.wallet_network || 'polygon')
+// 只支持 Polygon：以前填的是别的网络时地址不带出来，要客户重填
+const walletNetwork = ref('polygon')
 const walletToken = ref(props.client?.wallet_token || 'USDT')
-const walletAddress = ref(props.client?.wallet_address ?? '')
+const walletAddress = ref(props.client?.wallet_network === 'polygon' ? props.client?.wallet_address ?? '' : '')
+const oldNetwork = props.client?.wallet_address && props.client.wallet_network !== 'polygon' ? props.client.wallet_network : ''
+/** 新批次默认的每条结算单价；空 = 按实付金额 */
+const unitPrice = ref<number | null>(props.client?.unit_price != null ? Number(props.client.unit_price) : null)
 const addressOk = computed(() => !walletAddress.value.trim() || validAddress(walletNetwork.value, walletAddress.value.trim()))
 const saving = ref(false)
 /** 保存成功后显示可复制的登录信息 */
@@ -49,7 +53,8 @@ async function save(): Promise<void> {
       note: note.value.trim(),
       wallet_network: walletNetwork.value,
       wallet_token: walletToken.value,
-      wallet_address: walletAddress.value.trim()
+      wallet_address: walletAddress.value.trim(),
+      unit_price: unitPrice.value ?? ''
     })
     emit('saved')
     if (password.value) {
@@ -100,7 +105,11 @@ async function save(): Promise<void> {
             <a-input-number v-model:value="timeout" :min="10" :max="10080" :precision="0" addon-after="分钟" style="width: 100%" />
           </a-form-item>
         </div>
-        <a-divider orientation="left" plain class="divider">收款地址（客户一般自己填，这里可代填）</a-divider>
+        <a-form-item label="默认每条结算单价（USD，可空）" extra="派单时没填单价就用这个；留空 = 按每条实付金额结算">
+          <a-input-number v-model:value="unitPrice" :min="0" :max="1000" :precision="2" placeholder="如 5.00" style="width: 100%" />
+        </a-form-item>
+        <a-divider orientation="left" plain class="divider">收款地址（只支持 Polygon；客户一般自己填，这里可代填）</a-divider>
+        <a-alert v-if="oldNetwork" type="warning" show-icon class="divider" :message="`客户原来填的是 ${networkName(oldNetwork)} 地址，现在只支持 Polygon，需要重填`" />
         <div class="grid">
           <a-form-item label="网络">
             <a-select v-model:value="walletNetwork" :options="NETWORKS.map((x) => ({ value: x.id, label: x.name }))" />

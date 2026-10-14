@@ -16,7 +16,7 @@ async function viewSettlements() {
       <div class="table-wrap"><table class="table stack"><thead><tr><th>客户</th><th class="right">应结</th><th class="right">已结</th><th class="right">未结</th><th>收款地址</th><th></th></tr></thead>
       <tbody>${owed.map((c) => `<tr>
         <td data-label="客户"><b>${esc(c.display_name || c.username)}</b></td>
-        <td data-label="应结" class="right num">${usd(c.paid_usd)}</td><td data-label="已结" class="right num ok">${usd(c.settled)}</td>
+        <td data-label="应结" class="right num">${usd(c.due)}</td><td data-label="已结" class="right num ok">${usd(c.settled)}</td>
         <td data-label="未结" class="right num warn"><b>${usd(c.unsettled)}</b></td>
         <td data-label="收款地址">${walletCell(c)}</td>
         <td class="right nowrap"><button class="btn sm" data-client-orders="${c.id}" data-settle-filter="unsettled">未结批次</button>
@@ -43,7 +43,7 @@ async function viewClients() {
         <td data-label="状态">${c.enabled ? '<span class="badge ok">启用</span>' : '<span class="badge">已停用</span>'}</td>
         <td data-label="收款地址">${walletCell(c)}</td>
         <td data-label="待付" class="right num">${num(c.claimed)}</td>
-        <td data-label="已付" class="right num">${num(c.paid)}<div class="small muted">${usd(c.paid_usd)}</div></td>
+        <td data-label="已付" class="right num">${num(c.paid)}<div class="small muted">应结 ${usd(c.due)}${c.unit_price !== null ? ` · 每条 ${usd(c.unit_price)}` : ''}</div></td>
         <td data-label="未结" class="right num ${num(c.unsettled) > 0 ? 'warn' : ''}">${usd(c.unsettled)}</td>
         <td data-label="领取时限" class="small">${num(c.claim_timeout_minutes) % 1440 === 0 ? `${num(c.claim_timeout_minutes) / 1440} 天` : `${Math.round(num(c.claim_timeout_minutes) / 60)} 小时`}</td>
         <td data-label="最近登录" class="small text-2">${dt(c.last_login_at)}</td>
@@ -71,11 +71,12 @@ function clientModal(c) {
       <label class="field"><span>领取时限</span><select name="claim_timeout_minutes">${[[180, '3 小时'], [720, '12 小时'], [1440, '1 天'], [4320, '3 天'], [10080, '7 天（线下发出的客户）']].map(([v, l]) =>
         `<option value="${v}" ${num(c?.claim_timeout_minutes ?? 180) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
       <label class="field"><span>单次最多领取</span><input name="max_claim" type="number" min="1" max="500" value="${num(c?.max_claim ?? 50)}"></label>
-      <label class="field span-2"><span>备注</span><input name="note" value="${esc(c?.note ?? '')}" maxlength="255"></label>
-      <div class="span-2 section-title">收款地址（客户自己在门户里填；需要时可代填）</div>
+      <label class="field"><span>默认每条结算单价（可空）</span><input name="unit_price" type="number" step="0.01" min="0" value="${c?.unit_price ?? ''}" placeholder="空 = 按每条实付金额"></label>
+      <label class="field"><span>备注</span><input name="note" value="${esc(c?.note ?? '')}" maxlength="255"></label>
+      <div class="span-2 section-title">收款地址（只支持 Polygon；客户自己在门户里填，需要时可代填）</div>
       <label class="field"><span>网络</span><select name="wallet_network">${A.networks.map((n) => `<option value="${n.id}" ${(c?.wallet_network ?? 'polygon') === n.id ? 'selected' : ''}>${n.name}</option>`).join('')}</select></label>
       <label class="field"><span>币种</span><select name="wallet_token">${A.tokens.map((t) => `<option ${(c?.wallet_token ?? 'USDT') === t ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-      <label class="field span-2"><span>地址</span><input name="wallet_address" class="mono" value="${esc(c?.wallet_address ?? '')}" spellcheck="false" autocomplete="off"></label>
+      <label class="field span-2"><span>地址</span><input name="wallet_address" class="mono" value="${esc(c?.wallet_network === 'polygon' ? c?.wallet_address ?? '' : '')}" spellcheck="false" autocomplete="off"></label>
     </form>`, { wide: true, foot: '<button class="btn" data-close>取消</button><button class="btn primary" data-ok>保存</button>' })
   m.el.querySelector('[data-ok]').addEventListener('click', () => {
     const form = m.el.querySelector('form')
@@ -84,7 +85,8 @@ function clientModal(c) {
     const body = {
       username: String(f.get('username')).trim(), display_name: String(f.get('display_name')).trim(), enabled: f.get('enabled') === '1',
       claim_timeout_minutes: Number(f.get('claim_timeout_minutes')), max_claim: Number(f.get('max_claim')), note: String(f.get('note')).trim(),
-      wallet_network: f.get('wallet_network'), wallet_token: f.get('wallet_token'), wallet_address: String(f.get('wallet_address')).trim()
+      wallet_network: f.get('wallet_network'), wallet_token: f.get('wallet_token'), wallet_address: String(f.get('wallet_address')).trim(),
+      unit_price: f.get('unit_price')
     }
     const password = String(f.get('password'))
     if (password) body.password = password

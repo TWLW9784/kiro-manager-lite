@@ -170,7 +170,16 @@ ${esc(copyTitle)}"><span>${esc(label)}</span><i aria-hidden="true">⧉</i></butt
   /** 侧栏导航：data-view 切换 section；手机上点完收起 */
   function mountNav({ onChange }) {
     const shell = $('.shell')
-    $('.menu-btn')?.addEventListener('click', () => shell.classList.toggle('nav-open'))
+    // 手机上侧栏是抽出来的：点菜单打开；点右上角 ✕、点旁边的遮罩、按 Esc 都能关
+    const backdrop = Object.assign(document.createElement('div'), { className: 'nav-backdrop' })
+    shell.append(backdrop)
+    const closeNav = () => shell.classList.remove('nav-open')
+    $('.menu-btn')?.addEventListener('click', () => shell.classList.add('nav-open'))
+    $('.sidebar-close')?.addEventListener('click', closeNav)
+    backdrop.addEventListener('click', closeNav)
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && shell.classList.contains('nav-open') && !layers.length) closeNav()
+    })
     $('.nav').addEventListener('click', (e) => {
       const b = e.target.closest('[data-view]')
       if (!b) return

@@ -446,6 +446,16 @@ const NETWORKS = [
     'tron' => ['name' => 'Tron', 'address' => '/^T[1-9A-HJ-NP-Za-km-z]{33}$/', 'tx' => '/^[0-9a-fA-F]{64}$/', 'explorer' => 'https://tronscan.org/#/transaction/'],
 ];
 const TOKENS = ['USDT', 'USDC'];
+/**
+ * 现在开放的收款网络：只有 Polygon。NETWORKS 里其他的留着，只用来显示历史记录（名称、浏览器链接），
+ * 新填地址 / 记打款都只能选这里的。
+ */
+const ENABLED_NETWORKS = ['polygon'];
+
+function network_enabled(string $n): bool
+{
+    return in_array($n, ENABLED_NETWORKS, true);
+}
 
 function network_or_default(string $n): string
 {
@@ -462,11 +472,11 @@ function valid_tx_hash(string $network, string $hash): bool
     return isset(NETWORKS[$network]) && preg_match(NETWORKS[$network]['tx'], $hash) === 1;
 }
 
-/** 前端用：网络列表（名称、浏览器前缀），不带正则 */
+/** 前端用：可选的网络（名称、浏览器前缀），不带正则 */
 function networks_public(): array
 {
     $out = [];
-    foreach (NETWORKS as $k => $n) $out[] = ['id' => $k, 'name' => $n['name'], 'explorer' => $n['explorer']];
+    foreach (ENABLED_NETWORKS as $k) $out[] = ['id' => $k, 'name' => NETWORKS[$k]['name'], 'explorer' => NETWORKS[$k]['explorer']];
     return $out;
 }
 
@@ -524,4 +534,41 @@ function settle_status_for(float $due, float $settled): string
 {
     if ($settled <= 0) return 'unsettled';
     return $settled + 0.005 >= $due ? 'settled' : 'partial';
+}
+
+// ============ 应结金额 ============
+//
+// 结算按实际付款的条数：批次设了单价（每条已付款结多少）就是 已付条数 × 单价；
+// 没设单价按实付金额（每条 amount_due 合计）。没挂批次的已付款按实付金额算。
+
+/** 一个批次的应结（SQL 片段，需要 orders 别名 o、links 别名 l 已 LEFT JOIN） */
+const DUE_SQL = "IF(o.unit_price IS NULL, COALESCE(SUM(IF(l.status = 'paid', l.amount_due, 0)), 0), SUM(l.status = 'paid') * o.unit_price)";
+
+function order_due(int $orderId): float
+{
+    return (float) db()->query(
+        "SELECT " . DUE_SQL . " FROM orders o LEFT JOIN links l ON l.order_id = o.id WHERE o.id = $orderId GROUP BY o.id"
+    )->fetchColumn();
+}
+
+/** 每个客户的应结合计：client_id → 金额 */
+function client_due_map(?int $clientId = null): array
+{
+    $where = $clientId ? "WHERE o.client_id = $clientId" : '';
+    $map = [];
+    foreach (db()->query("SELECT o.client_id, " . DUE_SQL . " AS due FROM orders o LEFT JOIN links l ON l.order_id = o.id $where GROUP BY o.id") as $r) {
+        $map[$r['client_id']] = ($map[$r['client_id']] ?? 0) + (float) $r['due'];
+    }
+    $where2 = $clientId ? "AND client_id = $clientId" : '';
+    foreach (db()->query("SELECT client_id, SUM(amount_due) AS due FROM links WHERE status = 'paid' AND order_id IS NULL AND client_id IS NOT NULL $where2 GROUP BY client_id") as $r) {
+        $map[$r['client_id']] = ($map[$r['client_id']] ?? 0) + (float) $r['due'];
+    }
+    return array_map(fn ($v) => round($v, 2), $map);
+}
+
+/** 单价：空串 / null = 按实付金额；否则 0 ~ 1000 */
+function unit_price_or_null($v): ?float
+{
+    if ($v === null || $v === '' || !is_numeric($v)) return null;
+    return round(max(0, min(1000, (float) $v)), 2);
 }

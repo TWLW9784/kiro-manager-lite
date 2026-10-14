@@ -24,8 +24,12 @@ export interface AdminClient {
   wallet_updated_at: string | null
   /** 已结（USD）= 批次已结金额 + 没挂批次的打款 */
   settled: number
-  /** 未结 = 已付金额 − 已结 */
+  /** 应结（USD）：批次设了单价按 已付条数 × 单价，否则按实付金额 */
+  due: number
+  /** 未结 = 应结 − 已结 */
   unsettled: number
+  /** 新批次默认的每条结算单价；null = 按实付金额 */
+  unit_price: string | null
 }
 
 export interface AdminLink {
@@ -70,6 +74,8 @@ export interface ClientInput {
   wallet_network?: string
   wallet_token?: string
   wallet_address?: string
+  /** 空串 = 按实付金额 */
+  unit_price?: number | string | null
 }
 
 /** 网站上链接状态的中文名与颜色 */
@@ -127,7 +133,7 @@ export const paylinksAdmin = {
   /** 分页版：带筛选、搜索、按 id 取单个 */
   ordersPage: (filter: { id?: number; client_id?: number; status?: string; settle?: string; q?: string; page: number; page_size: number }) =>
     call<{ total: number; page: number; page_size: number; orders: AdminOrder[] }>({ op: 'orders', ...filter }),
-  settleOrder: (input: { id: number; settle_status?: SettleStatus; settled_amount?: number; settle_note?: string }) =>
+  settleOrder: (input: { id: number; settle_status?: SettleStatus; settled_amount?: number; settle_note?: string; unit_price?: number | string | null }) =>
     call({ op: 'order_settle', ...input }),
   settlements: (filter: { client_id?: number; order_id?: number; page?: number; page_size?: number }) =>
     call<{ total: number; sum: number; page: number; page_size: number; settlements: AdminSettlement[] }>({ op: 'settlements', ...filter }),
@@ -135,7 +141,7 @@ export const paylinksAdmin = {
   logs: (filter: { filter_op?: string; page: number; page_size: number }) =>
     call<{ total: number; page: number; page_size: number; logs: AdminLog[] }>({ op: 'logs', ...filter }),
   resolveLink: (id: number, result: 'paid' | 'expired') => call({ op: 'link_resolve', id, result }),
-  createOrder: (input: { client_id: number; tier: string; quantity: number; replace_limit?: number; note?: string }) =>
+  createOrder: (input: { client_id: number; tier: string; quantity: number; replace_limit?: number; note?: string; unit_price?: number }) =>
     call<{ id: number; code: string }>({ op: 'order_create', ...input }),
   updateOrder: (input: { id: number; quantity?: number; replace_limit?: number; status?: 'cancelled' | 'done' }) =>
     call({ op: 'order_update', ...input }),
@@ -176,6 +182,10 @@ export interface AdminOrder {
   settled_amount: string
   settled_at: string | null
   settle_note: string
+  /** 每条结算单价；null = 按实付金额 */
+  unit_price: string | null
+  /** 应结（USD）：已付条数 × 单价，或实付合计 */
+  due_amount: string
   /** 打款记录条数 */
   settlements: string | null
   wallet_network: string | null
@@ -247,23 +257,17 @@ export interface AdminLog {
   detail: string
 }
 
-/** 收款网络：与 server/paylinks/inc/lib.php 的 NETWORKS 一致，地址格式用于前端预校验 */
-export const NETWORKS = [
-  { id: 'polygon', name: 'Polygon', evm: true },
-  { id: 'ethereum', name: 'Ethereum', evm: true },
-  { id: 'bsc', name: 'BNB Chain', evm: true },
-  { id: 'arbitrum', name: 'Arbitrum', evm: true },
-  { id: 'tron', name: 'Tron', evm: false }
-] as const
+/** 可选的收款网络：只有 Polygon（与 server/paylinks/inc/lib.php 的 ENABLED_NETWORKS 一致） */
+export const NETWORKS = [{ id: 'polygon', name: 'Polygon', evm: true }] as const
+/** 历史记录里可能出现的网络名（以前开放过） */
+const NETWORK_NAMES: Record<string, string> = { polygon: 'Polygon', ethereum: 'Ethereum', bsc: 'BNB Chain', arbitrum: 'Arbitrum', tron: 'Tron' }
 export const TOKENS = ['USDT', 'USDC'] as const
-export const networkName = (id: string | null | undefined): string => NETWORKS.find((n) => n.id === id)?.name ?? (id || '-')
-export function validAddress(network: string, address: string): boolean {
-  return NETWORKS.find((n) => n.id === network)?.evm === false
-    ? /^T[1-9A-HJ-NP-Za-km-z]{33}$/.test(address)
-    : /^0x[0-9a-fA-F]{40}$/.test(address)
+export const networkName = (id: string | null | undefined): string => NETWORK_NAMES[id ?? ''] ?? (id || '-')
+export function validAddress(_network: string, address: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(address)
 }
-export function validTxHash(network: string, hash: string): boolean {
-  return network === 'tron' ? /^[0-9a-fA-F]{64}$/.test(hash) : /^0x[0-9a-fA-F]{64}$/.test(hash)
+export function validTxHash(_network: string, hash: string): boolean {
+  return /^0x[0-9a-fA-F]{64}$/.test(hash)
 }
 /** 收款地址 24 小时内改过：打款前提醒先跟客户确认 */
 export function walletFresh(updatedAt: string | null | undefined): boolean {

@@ -5,12 +5,14 @@ const tt = (k, p) => t(k, p)
 
 const S = {
   me: null,
-  view: 'overview',
+  view: 'work',
   orders: { page: 1, size: 10, status: '', settle: '' },
   pending: { page: 1, size: 20, order_id: '' },
   paid: { page: 1, size: 20, from: '', to: '' },
   settlements: { page: 1, size: 20 },
   selected: new Set(),
+  /** 刚领到的，表格里高亮 */
+  fresh: new Set(),
   pendingRows: [],
   drawer: null
 }
@@ -53,33 +55,125 @@ async function loadMe() {
   $('#nav-orders').textContent = S.me.stats.open_orders || ''
 }
 
-// ============ 概览 ============
-async function viewOverview() {
-  const [_, recent] = await Promise.all([loadMe(), api.get('my_orders', { page: 1, page_size: 5 })])
-  const s = S.me.stats
+// ============ 付款工作台：领链接 + 待付款，打开就能复制 ============
+/** 收款地址提示：没填 / 填的不是 Polygon 都要提醒 */
+function walletNotice() {
   const c = S.me.client
-  const walletWarn = c.wallet_address
-    ? `<div class="callout info"><div class="grow"><b>${esc(t('wallet_current'))}</b>
-        <span class="mono">${esc(networkName(c.wallet_network))} · ${esc(c.wallet_token)} · ${esc(c.wallet_address)}</span></div>
-        <button class="btn sm" data-goto="wallet">${esc(t('wallet_edit'))}</button></div>`
-    : `<div class="callout warn"><div class="grow"><b>${esc(t('wallet_missing'))}</b><span class="text-2">${esc(t('wallet_missing_tip'))}</span></div>
-        <button class="btn sm primary" data-goto="wallet">${esc(t('wallet_set'))}</button></div>`
-  $('[data-section="overview"]').innerHTML = `
+  if (!c.wallet_address) {
+    return `<div class="callout warn"><div class="grow"><b>${esc(t('wallet_missing'))}</b><span class="text-2 small">${esc(t('wallet_missing_tip'))}</span></div>
+      <button class="btn sm primary" data-goto="wallet">${esc(t('wallet_set'))}</button></div>`
+  }
+  if (!c.wallet_network_ok) {
+    return `<div class="callout danger"><div class="grow"><b>${esc(t('wallet_wrong_network', { name: c.wallet_network_name }))}</b>
+      <span class="text-2 small">${esc(t('wallet_wrong_network_tip'))}</span></div>
+      <button class="btn sm primary" data-goto="wallet">${esc(t('wallet_edit'))}</button></div>`
+  }
+  return ''
+}
+
+async function viewWork() {
+  const f = S.pending
+  const [, open, r] = await Promise.all([
+    loadMe(),
+    api.get('my_orders', { page: 1, page_size: 50, status: 'open' }),
+    api.get('my_claimed', { page: f.page, page_size: f.size, order_id: f.order_id })
+  ])
+  const s = S.me.stats
+  S.pendingRows = r.links
+  const alive = new Set(r.links.map((l) => String(l.id)))
+  for (const id of [...S.selected]) if (!alive.has(id)) S.selected.delete(id)
+  const claimable = open.orders.filter((o) => num(o.remaining) > 0)
+  const offline = open.orders.filter((o) => o.source === 'offline' && num(o.holding) > 0)
+  const allChecked = r.links.length > 0 && r.links.every((l) => l.status !== 'claimed' || S.selected.has(String(l.id)))
+  const maxClaim = S.me.max_claim || 50
+
+  // 领取：每个可领的批次一行，进度 + 数量 + 领取按钮
+  const claimCard = claimable.length
+    ? `<div class="card">
+        <div class="card-head"><h2>${esc(t('claim_title'))}</h2><span class="small text-2">${esc(t('claim_hint'))}</span></div>
+        <div class="claim-list">${claimable.map((o) => {
+          const n = Math.min(num(o.remaining), maxClaim)
+          return `<div class="claim-row">
+            <div class="grow"><b>${esc(o.code)}</b> <span class="badge plain">${esc(o.tier)}</span>
+              <div class="small text-2">${esc(t('target_progress', { paid: num(o.paid), qty: o.quantity, holding: num(o.holding), remaining: num(o.remaining) }))}</div>
+              ${progress(o)}</div>
+            <input type="number" min="1" max="${n}" value="${n}" data-claim-count="${o.id}" aria-label="${esc(t('count'))}">
+            <button class="btn primary" data-claim-now="${o.id}">${esc(t('claim'))}</button>
+          </div>`
+        }).join('')}</div>
+      </div>`
+    : open.orders.length
+      ? ''
+      : `<div class="callout info"><div class="grow"><b>${esc(t('no_open_orders'))}</b><span class="small text-2">${esc(t('no_orders_tip'))}</span></div></div>`
+
+  $('[data-section="work"]').innerHTML = `
+    ${walletNotice()}
     <div class="stats">
       <div class="card stat accent-warn"><span class="stat-label">${esc(t('stat_pending'))}</span><span class="stat-value">${s.claimed + s.checking}</span>
         <span class="stat-sub">${s.checking ? esc(t('stat_checking_n', { n: s.checking })) : esc(t('stat_pending_sub'))}</span></div>
       <div class="card stat accent-ok"><span class="stat-label">${esc(t('stat_paid'))}</span><span class="stat-value">${s.paid}</span>
         <span class="stat-sub">${esc(t('stat_today_n', { n: s.paid_today }))}</span></div>
-      <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(s.paid_usd)}</span>
-        <span class="stat-sub">≈ ${cny(s.paid_cny)}</span></div>
+      <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(s.due)}</span>
+        <span class="stat-sub">${esc(t('stat_due_sub'))}</span></div>
       <div class="card stat accent-primary"><span class="stat-label">${esc(t('stat_settled'))}</span><span class="stat-value">${usd(s.settled)}</span>
         <span class="stat-sub">${esc(t('stat_unsettled_n', { n: usd(s.unsettled) }))}</span></div>
     </div>
-    ${walletWarn}
-    <div class="card">
-      <div class="card-head"><h2>${esc(t('recent_orders'))}</h2><button class="btn sm" data-goto="orders">${esc(t('view_all'))}</button></div>
-      ${ordersTable(recent.orders)}
+    ${claimCard}
+    <div class="card" id="pending-card">
+      <div class="card-head"><h2>${esc(t('pending_title'))} <span class="badge warn plain">${r.total}</span></h2>
+        <div class="btn-group">
+          <button class="btn sm primary" data-pa="copy-all" ${r.total ? '' : 'disabled'}>${esc(t('copy_all_pending', { n: r.total }))}</button>
+          <button class="btn sm" data-pa="copy-sel">${esc(t('copy_selected'))}</button>
+          <button class="btn sm" data-pa="txt">${esc(t('export_txt'))}</button>
+          <button class="btn sm danger" data-pa="release">${esc(t('release_selected'))}</button>
+        </div>
+      </div>
+      <div class="toolbar">
+        <select data-pf="order_id" aria-label="${esc(t('col_batch'))}"><option value="">${esc(t('all_orders'))}</option>
+          ${open.orders.filter((o) => num(o.holding)).map((o) => `<option value="${o.id}" ${String(f.order_id) === String(o.id) ? 'selected' : ''}>${esc(o.code)}（${num(o.holding)}）</option>`).join('')}
+        </select>
+        <span class="muted small" id="sel-info">${esc(t('selected_n', { n: S.selected.size }))}</span>
+        <span class="grow"></span>
+        <span class="small text-2">${esc(claimRule())}</span>
+      </div>
+      ${r.links.length ? `<div class="table-wrap"><table class="table stack"><thead><tr>
+          <th class="c-check"><input type="checkbox" data-check-all ${allChecked ? 'checked' : ''} aria-label="${esc(t('select_all'))}"></th>
+          <th>${esc(t('col_link'))}</th><th>${esc(t('col_batch'))}</th><th class="right">${esc(t('col_amount'))}</th><th>${esc(t('col_left'))}</th><th></th>
+        </tr></thead><tbody>${r.links.map((l) => {
+          const checking = l.status === 'checking'
+          return `<tr class="${S.fresh.has(String(l.id)) ? 'fresh' : ''}">
+            <td class="c-check"><input type="checkbox" data-sel="${l.id}" ${S.selected.has(String(l.id)) ? 'checked' : ''} ${checking ? 'disabled' : ''} aria-label="${esc(t('select'))}"></td>
+            <td data-label="${esc(t('col_link'))}" class="url">${linkCell(l.url, { copyTitle: t('click_copy') })}</td>
+            <td data-label="${esc(t('col_batch'))}">${l.code ? `<button class="link-btn" data-order="${l.order_id}">${esc(l.code)}</button>` : '-'}<span class="small muted"> · ${esc(l.tier)}</span></td>
+            <td data-label="${esc(t('col_amount'))}" class="right num">${usd(l.amount_due)}<div class="small muted">${cny(l.amount_cny)}</div></td>
+            <td data-label="${esc(t('col_left'))}" class="nowrap">${checking ? linkBadge('checking') : `<span class="${l.expires_in < 900 ? 'warn' : 'text-2'} small">${esc(left(l.expires_in))}</span>`}</td>
+            <td class="right nowrap">
+              <a class="btn sm" href="${esc(l.url)}" target="_blank" rel="noopener noreferrer">${esc(t('open_pay'))}</a>
+              ${!checking && l.source !== 'offline' && l.order_id ? `<button class="btn sm ghost" data-replace="${l.id}">${esc(t('replace'))}</button>` : ''}</td>
+          </tr>`
+        }).join('')}</tbody></table></div>`
+        : empty(t('no_claimed'), claimable.length ? t('no_claimed_claim_tip') : offline.length ? '' : t('no_claimed_tip'))}
+      <div class="pager" id="pending-pager"></div>
     </div>`
+  pager($('#pending-pager'), { total: r.total, page: r.page, size: r.page_size, sizes: [20, 50, 100, 200], tt, onChange: (p, sz) => { f.page = p; f.size = sz; guard(viewWork) } })
+}
+
+/** 工作台里点「领取」：领到的自动勾上并高亮，直接点「复制所选」 */
+async function claimFrom(btn) {
+  const id = btn.dataset.claimNow
+  const n = Math.max(1, num($(`[data-claim-count="${id}"]`)?.value))
+  btn.disabled = true
+  await guard(async () => {
+    const res = await api.post('claim', { order_id: Number(id), count: n })
+    S.fresh = new Set(res.ids.map(String))
+    for (const x of res.ids) S.selected.add(String(x))
+    toast(res.claimed ? t('claimed_ok', { n: res.claimed }) + (res.short ? t('claimed_short', { n: res.short }) : '') : t('waiting_stock'), res.claimed ? 'ok' : '')
+    S.pending.page = 1
+    S.pending.order_id = ''
+    await viewWork()
+    $('#pending-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  })
+  btn.disabled = false
 }
 
 /** 批次表：概览和「我的批次」共用 */
@@ -92,7 +186,7 @@ function ordersTable(rows) {
       <td data-label="${esc(t('col_batch'))}"><b>${esc(o.code)}</b> ${sourceTag(o)}${o.note ? `<div class="muted small">${esc(o.note)}</div>` : ''}</td>
       <td data-label="${esc(t('col_tier'))}">${esc(o.tier)} × ${o.quantity}</td>
       <td data-label="${esc(t('col_progress'))}">${progress(o)}<span class="small text-2">${esc(t('progress_short', { paid: num(o.paid), qty: o.quantity, holding: num(o.holding) }))}</span></td>
-      <td data-label="${esc(t('col_paid_amount'))}" class="right num">${usd(o.paid_usd)}</td>
+      <td data-label="${esc(t('col_paid_amount'))}" class="right num">${usd(o.due_amount)}${o.unit_price !== null ? `<div class="small muted">${esc(t('per_link', { p: usd(o.unit_price) }))}</div>` : ''}</td>
       <td data-label="${esc(t('col_status'))}">${orderBadge(o.status)}</td>
       <td data-label="${esc(t('col_settle'))}">${settleBadge(o.settle_status)}${num(o.settled_amount) ? `<div class="small muted num">${usd(o.settled_amount)}</div>` : ''}</td>
       <td data-label="${esc(t('col_created'))}" class="small text-2">${dt(o.created_at)}</td>
@@ -123,7 +217,7 @@ async function openOrder(id) {
   const r = await api.get('my_order', { id })
   const o = r.order
   const filter = { v: 'all' }
-  const due = num(o.paid_usd)
+  const due = num(o.due_amount)
   const body = () => {
     const links = filter.v === 'all' ? r.links : r.links.filter((l) => l.status === filter.v)
     const unpaid = r.links.filter((l) => l.status === 'claimed')
@@ -134,19 +228,21 @@ async function openOrder(id) {
         <div class="card stat accent-ok"><span class="stat-label">${esc(t('stat_paid'))}</span><span class="stat-value">${num(o.paid)} / ${o.quantity}</span>${progress(o)}</div>
         <div class="card stat accent-warn"><span class="stat-label">${esc(t('stat_pending'))}</span><span class="stat-value">${num(o.holding)}</span>
           <span class="stat-sub">${num(o.void) ? esc(t('void_n', { n: num(o.void) })) : '&nbsp;'}</span></div>
-        <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(due)}</span><span class="stat-sub">≈ ${cny(o.paid_cny)}</span></div>
+        <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(due)}</span>
+          <span class="stat-sub">${o.unit_price !== null ? esc(t('settle_by_count', { n: num(o.paid), p: usd(o.unit_price) })) : esc(t('settle_by_amount'))}</span></div>
         <div class="card stat accent-primary"><span class="stat-label">${esc(t('stat_settled'))}</span><span class="stat-value">${usd(o.settled_amount)}</span>
           <span class="stat-sub">${settleBadge(o.settle_status)}</span></div>
       </div>
       <dl class="kv">
-        <dt>${esc(t('col_tier'))}</dt><dd>${esc(o.tier)} × ${o.quantity}</dd>
+        <dt>${esc(t('col_tier'))}</dt><dd>${esc(o.tier)}</dd>
+        <dt>${esc(t('col_target'))}</dt><dd>${esc(t('target_progress', { paid: num(o.paid), qty: o.quantity, holding: num(o.holding), remaining: num(o.remaining) }))}</dd>
         <dt>${esc(t('col_source'))}</dt><dd>${o.source === 'offline' ? esc(t('source_offline_tip')) : esc(t('source_site_tip'))}</dd>
         <dt>${esc(t('col_created'))}</dt><dd>${esc(o.created_at)}</dd>
         ${o.note ? `<dt>${esc(t('col_note'))}</dt><dd>${esc(o.note)}</dd>` : ''}
       </dl>
       ${o.status === 'open' && num(o.remaining) > 0 ? `<div class="callout info"><div class="grow"><b>${esc(t('can_claim_n', { n: o.remaining }))}</b>
-          <span class="text-2 small">${esc(claimRule())}</span></div>
-          <input type="number" min="1" max="${o.remaining}" value="${o.remaining}" data-claim-count style="width:90px" aria-label="${esc(t('count'))}">
+          <span class="text-2 small">${esc(t('claim_hint'))} ${esc(claimRule())}</span></div>
+          <input type="number" min="1" max="${Math.min(num(o.remaining), S.me?.max_claim || 50)}" value="${Math.min(num(o.remaining), S.me?.max_claim || 50)}" data-claim-count style="width:90px" aria-label="${esc(t('count'))}">
           <button class="btn primary" data-claim="${o.id}">${esc(t('claim'))}</button></div>` : ''}
       <div class="card">
         <div class="card-head"><h2>${esc(t('links_title'))}</h2>
@@ -189,8 +285,10 @@ async function openOrder(id) {
       await guard(async () => {
         const res = await api.post('claim', { order_id: Number(id), count: n })
         toast(res.claimed ? t('claimed_ok', { n: res.claimed }) + (res.short ? t('claimed_short', { n: res.short }) : '') : t('waiting_stock'), res.claimed ? 'ok' : '')
+        S.fresh = new Set(res.ids.map(String))
+        for (const x of res.ids) S.selected.add(String(x))
         layer.close()
-        openOrder(id)
+        nav.go('work')
       })
       cl.disabled = false
     }
@@ -211,52 +309,7 @@ async function replaceLink(linkId, after) {
     after?.()
   })
 }
-// ============ 待付款 ============
-async function viewPending() {
-  const f = S.pending
-  const [r, open] = await Promise.all([
-    api.get('my_claimed', { page: f.page, page_size: f.size, order_id: f.order_id }),
-    api.get('my_orders', { page: 1, page_size: 50 })
-  ])
-  S.pendingRows = r.links
-  const alive = new Set(r.links.map((l) => String(l.id)))
-  for (const id of [...S.selected]) if (!alive.has(id)) S.selected.delete(id)
-  const allChecked = r.links.length > 0 && r.links.every((l) => l.status !== 'claimed' || S.selected.has(String(l.id)))
-  $('[data-section="pending"]').innerHTML = `
-    <div class="callout info"><div class="grow small text-2">${esc(claimRule())}</div></div>
-    <div class="card">
-      <div class="toolbar">
-        <select data-pf="order_id" aria-label="${esc(t('col_batch'))}"><option value="">${esc(t('all_orders'))}</option>
-          ${open.orders.filter((o) => num(o.holding)).map((o) => `<option value="${o.id}" ${String(f.order_id) === String(o.id) ? 'selected' : ''}>${esc(o.code)}（${num(o.holding)}）</option>`).join('')}
-        </select>
-        <span class="muted small" id="sel-info">${esc(t('selected_n', { n: S.selected.size }))}</span>
-        <span class="grow"></span>
-        <div class="btn-group">
-          <button class="btn sm primary" data-pa="copy-sel">${esc(t('copy_selected'))}</button>
-          <button class="btn sm" data-pa="copy-all">${esc(t('copy_all_pending', { n: r.total }))}</button>
-          <button class="btn sm" data-pa="txt">${esc(t('export_txt'))}</button>
-          <button class="btn sm danger" data-pa="release">${esc(t('release_selected'))}</button>
-        </div>
-      </div>
-      ${r.links.length ? `<div class="table-wrap"><table class="table stack"><thead><tr>
-          <th class="c-check"><input type="checkbox" data-check-all ${allChecked ? 'checked' : ''} aria-label="${esc(t('select_all'))}"></th>
-          <th>${esc(t('col_batch'))}</th><th class="right">${esc(t('col_amount'))}</th><th>${esc(t('col_link'))}</th><th>${esc(t('col_left'))}</th><th></th>
-        </tr></thead><tbody>${r.links.map((l) => {
-          const checking = l.status === 'checking'
-          return `<tr>
-            <td class="c-check"><input type="checkbox" data-sel="${l.id}" ${S.selected.has(String(l.id)) ? 'checked' : ''} ${checking ? 'disabled' : ''} aria-label="${esc(t('select'))}"></td>
-            <td data-label="${esc(t('col_batch'))}">${l.code ? `<button class="link-btn" data-order="${l.order_id}">${esc(l.code)}</button>` : '-'}<div class="small muted">${esc(l.tier)}</div></td>
-            <td data-label="${esc(t('col_amount'))}" class="right num">${usd(l.amount_due)}<div class="small muted">${cny(l.amount_cny)}</div></td>
-            <td data-label="${esc(t('col_link'))}" class="url">${linkCell(l.url, { copyTitle: t('click_copy') })}</td>
-            <td data-label="${esc(t('col_left'))}" class="nowrap">${checking ? linkBadge('checking') : `<span class="${l.expires_in < 900 ? 'warn' : 'text-2'} small">${esc(left(l.expires_in))}</span>`}</td>
-            <td class="right nowrap">${!checking && l.source !== 'offline' && l.order_id ? `<button class="btn sm ghost" data-replace="${l.id}">${esc(t('replace'))}</button>` : ''}</td>
-          </tr>`
-        }).join('')}</tbody></table></div>` : empty(t('no_claimed'), t('no_claimed_tip'))}
-      <div class="pager" id="pending-pager"></div>
-    </div>`
-  pager($('#pending-pager'), { total: r.total, page: r.page, size: r.page_size, sizes: [20, 50, 100, 200], tt, onChange: (p, s) => { f.page = p; f.size = s; guard(viewPending) } })
-}
-
+// ============ 待付款：跨页选择、复制、导出、放回 ============
 /** 选中的（跨页保留选择；本页没有的按 id 去取） */
 async function selectedLinks() {
   if (!S.selected.size) return []
@@ -294,7 +347,7 @@ async function pendingAction(act) {
     const r = await api.post('release', { ids: rows.map((x) => Number(x.id)) })
     for (const x of rows) S.selected.delete(String(x.id))
     toast(t('released', { n: r.released }), 'ok')
-    return viewPending()
+    return viewWork()
   }
 }
 
@@ -347,7 +400,7 @@ async function viewSettlements() {
   const s = S.me.stats
   $('[data-section="settlements"]').innerHTML = `
     <div class="stats">
-      <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(s.paid_usd)}</span><span class="stat-sub">${esc(t('stat_due_sub'))}</span></div>
+      <div class="card stat"><span class="stat-label">${esc(t('stat_due'))}</span><span class="stat-value">${usd(s.due)}</span><span class="stat-sub">${esc(t('stat_due_sub'))}</span></div>
       <div class="card stat accent-ok"><span class="stat-label">${esc(t('stat_settled'))}</span><span class="stat-value">${usd(s.settled)}</span><span class="stat-sub">${esc(t('settle_records_n', { n: r.total }))}</span></div>
       <div class="card stat accent-warn"><span class="stat-label">${esc(t('stat_unsettled'))}</span><span class="stat-value">${usd(s.unsettled)}</span><span class="stat-sub">${esc(t('settle_rule'))}</span></div>
     </div>
@@ -365,12 +418,13 @@ async function viewWallet() {
       <div class="card-body" style="display:flex;flex-direction:column;gap:14px">
         <div class="form-grid">
           <label class="field"><span>${esc(t('wallet_network'))}</span>
-            <select name="network">${S.me.networks.map((n) => `<option value="${n.id}" ${n.id === c.wallet_network ? 'selected' : ''}>${esc(n.name)}${n.id === 'polygon' ? ` · ${esc(t('recommended'))}` : ''}</option>`).join('')}</select></label>
+            <select name="network">${S.me.networks.map((n) => `<option value="${n.id}" selected>${esc(n.name)}</option>`).join('')}</select>
+            <span class="hint">${esc(t('polygon_only'))}</span></label>
           <label class="field"><span>${esc(t('wallet_token'))}</span>
             <select name="token">${S.me.tokens.map((k) => `<option ${k === c.wallet_token ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
         </div>
         <label class="field"><span>${esc(t('wallet_address'))}</span>
-          <input name="address" class="mono" value="${esc(c.wallet_address)}" placeholder="0x…" autocomplete="off" spellcheck="false" required>
+          <input name="address" class="mono" value="${esc(c.wallet_network_ok ? c.wallet_address : '')}" placeholder="0x…" autocomplete="off" spellcheck="false" required>
           <span class="hint" id="addr-hint">${esc(t('wallet_address_hint'))}</span></label>
         <label class="field"><span>${esc(t('wallet_password'))}</span>
           <input name="password" type="password" autocomplete="current-password" required>
@@ -381,8 +435,9 @@ async function viewWallet() {
     <div class="card">
       <div class="card-head"><h2>${esc(t('wallet_current'))}</h2></div>
       <div class="card-body">
+        ${walletNotice()}
         ${c.wallet_address ? `<dl class="kv">
-          <dt>${esc(t('wallet_network'))}</dt><dd>${esc(networkName(c.wallet_network))}</dd>
+          <dt>${esc(t('wallet_network'))}</dt><dd>${esc(c.wallet_network_name)}</dd>
           <dt>${esc(t('wallet_token'))}</dt><dd>${esc(c.wallet_token)}</dd>
           <dt>${esc(t('wallet_address'))}</dt><dd><span class="mono">${esc(c.wallet_address)}</span> <button class="btn sm" type="button" data-copy="${esc(c.wallet_address)}">${esc(t('copy'))}</button></dd>
           <dt>${esc(t('wallet_updated'))}</dt><dd>${esc(c.wallet_updated_at || '-')}</dd>
@@ -415,8 +470,8 @@ async function viewWallet() {
 }
 
 // ============ 路由 / 事件 / 刷新 ============
-const VIEWS = { overview: viewOverview, orders: viewOrders, pending: viewPending, paid: viewPaid, settlements: viewSettlements, wallet: viewWallet }
-const TITLES = { overview: 'nav_overview', orders: 'nav_orders', pending: 'nav_pending', paid: 'nav_paid', settlements: 'nav_settlements', wallet: 'nav_wallet' }
+const VIEWS = { work: viewWork, orders: viewOrders, paid: viewPaid, settlements: viewSettlements, wallet: viewWallet }
+const TITLES = { work: 'nav_work', orders: 'nav_orders', paid: 'nav_paid', settlements: 'nav_settlements', wallet: 'nav_wallet' }
 function render() {
   $('#page-title').textContent = t(TITLES[S.view])
   return guard(VIEWS[S.view])
@@ -433,6 +488,8 @@ document.addEventListener('click', (e) => {
   if (c) return copy(c.dataset.copy).then(() => toast(t('copied', { n: 1 }), 'ok'))
   const rep = e.target.closest('[data-replace]')
   if (rep) return replaceLink(rep.dataset.replace, render)
+  const cn = e.target.closest('[data-claim-now]')
+  if (cn) return claimFrom(cn)
   const pa = e.target.closest('[data-pa]')
   if (pa) return guard(() => pendingAction(pa.dataset.pa))
   const sf = e.target.closest('[data-f][data-v]')
@@ -464,7 +521,7 @@ document.addEventListener('langchange', render)
 setInterval(() => {
   if (document.hidden || S.drawer || document.querySelector('.modal')) return
   if (document.activeElement?.matches?.('input, select, textarea')) return
-  if (['overview', 'orders', 'pending'].includes(S.view)) render()
+  if (['work', 'orders'].includes(S.view)) render()
   else guard(loadMe)
 }, 10000)
 

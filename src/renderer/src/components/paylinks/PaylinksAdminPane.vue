@@ -285,7 +285,8 @@ function onLinksChanged(_links: AdminLink[]): void {
                   <a-tooltip :title="record.wallet_address"><span class="mono small">{{ shortAddr(record.wallet_address) }}</span></a-tooltip>
                   <a-button type="link" size="small" @click="copyText(record.wallet_address, '已复制地址')"><template #icon><CopyOutlined /></template></a-button>
                 </div>
-                <a-tag v-if="walletFresh(record.wallet_updated_at)" color="red" :bordered="false">24 小时内改过</a-tag>
+                <a-tag v-if="record.wallet_network !== 'polygon'" color="red" :bordered="false">不是 Polygon，让客户重填</a-tag>
+                <a-tag v-else-if="walletFresh(record.wallet_updated_at)" color="red" :bordered="false">24 小时内改过</a-tag>
               </template>
               <a-tag v-else color="orange" :bordered="false">未设置</a-tag>
             </template>
@@ -294,7 +295,7 @@ function onLinksChanged(_links: AdminLink[]): void {
               {{ n(record.paid) }}<div class="muted small">今日 <b class="ok">{{ n(record.paid_today) }}</b></div>
             </template>
             <template v-else-if="column.key === 'amount'">
-              <div>{{ money(record.paid_usd, '$') }}</div>
+              <div>{{ money(record.due, '$') }}<span v-if="record.unit_price != null" class="muted small"> · 每条 {{ money(record.unit_price, '$') }}</span></div>
               <div class="small" :class="n(record.unsettled) > 0 ? 'warn' : 'muted'">未结 {{ money(record.unsettled, '$') }}</div>
             </template>
             <template v-else-if="column.key === 'rule'">
