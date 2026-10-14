@@ -358,7 +358,7 @@ $('tab-links').addEventListener('click', (e) => {
 // ============ 日志 ============
 const OPS = {
   client_save: '保存客户', client_delete: '删除客户', client_kick: '强制下线', link_revoke: '收回链接',
-  link_resolve: '手动定性', order_create: '派单', order_update: '修改批次'
+  link_resolve: '手动定性', order_create: '派单', order_update: '修改批次', backfill_paid: '补记已付'
 }
 loaders.logs = async () => {
   const { logs } = await adm('logs', { page_size: 200 })

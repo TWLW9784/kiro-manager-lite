@@ -324,7 +324,8 @@ export interface PaylinksServerLink {
   account_ref: string
   tier: string
   amount_due: string | null
-  status: 'available' | 'claimed' | 'checking' | 'paid' | 'refresh'
+  /** superseded 只会是被客户领过的旧链接，用来补记「号已付费、网站没记」 */
+  status: 'available' | 'claimed' | 'checking' | 'paid' | 'refresh' | 'superseded'
   refresh_reason: string | null
   claimed_at: string | null
   paid_at: string | null

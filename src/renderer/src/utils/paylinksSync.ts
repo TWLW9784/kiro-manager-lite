@@ -173,7 +173,17 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
    * 客户可能付的就是旧链接，或者本地早就知道付了；不回报的话网站上会一直卡在确认中。
    */
   const checking = new Map<string, PaylinksServerLink[]>()
+  /**
+   * 号在本地已经是付费档、网站上却没记已付：被客户领过的链接（已领 / 待换新 / 已下架的旧链接）里挑一条补记。
+   * 客户手里留着旧链接（TXT、截图）照样能付，网站上早已换新下架，不补的话结算会漏。
+   */
+  const paidElsewhere = new Map<string, PaylinksServerLink[]>()
   const paidRefs = new Set<string>()
+  const add = (map: Map<string, PaylinksServerLink[]>, id: string, item: PaylinksServerLink): void => {
+    const list = map.get(id) ?? []
+    list.push(item)
+    map.set(id, list)
+  }
   for (const item of res.data.links) {
     const account = byRef.get(item.account_ref)
     if (!account?.paymentLink) continue
@@ -181,11 +191,16 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
     const current = urlHashes[link.url] === item.url_hash
     const stillPending = pending.includes(account)
     if (item.status === 'paid') paidRefs.add(item.account_ref)
-    if (item.status === 'checking') {
-      const list = checking.get(account.id) ?? []
-      list.push(item)
-      checking.set(account.id, list)
+    if (item.status === 'checking') add(checking, account.id, item)
+    else if (
+      item.claimed_at &&
+      ['claimed', 'refresh', 'superseded'].includes(item.status) &&
+      isPaidSubscription(account.subscription.type)
+    ) {
+      add(paidElsewhere, account.id, item)
     }
+    // 已下架的只用来补记已付，其余一概不管
+    if (item.status === 'superseded') continue
     if (!current || !stillPending) {
       // 旧链接（已换新）或本地已不需要付款的号：还没卖出去的下架；已领走 / 已付的保持原样
       if (item.status === 'available' || item.status === 'refresh') pendingSupersede.push(item.url_hash)
@@ -251,6 +266,19 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
       if (result === 'paid') summary.confirmedPaid++
       else summary.confirmedExpired++
     }
+  }
+
+  // 号已付费、网站没记：每个号补记一条（没被上面确认中那段记过的才补）；其余的照常由下架逻辑处理
+  for (const [id, items] of paidElsewhere) {
+    const ref = accountRefs[id]
+    if (paidRefs.has(ref)) continue
+    const account = store.get(id)
+    const winner = pickPaid(items, account?.paymentLink ? urlHashes[account.paymentLink.url] : '')
+    paidRefs.add(ref)
+    pendingResolve.push({ url_hash: winner.url_hash, result: 'paid' })
+    // 同一轮里别再让网站把它下架
+    pendingSupersede = pendingSupersede.filter((h) => h !== winner.url_hash)
+    summary.confirmedPaid++
   }
 
   for (const [id, item] of serverByAccount) {

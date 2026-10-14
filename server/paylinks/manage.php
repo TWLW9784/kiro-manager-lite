@@ -7,7 +7,7 @@ header('X-Frame-Options: DENY');
 header('Cache-Control: no-store');
 $authed = admin_session_ok();
 $csrf = $authed ? ($_SESSION['admin_csrf'] ?? '') : '';
-$v = '3';
+$v = '4';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>

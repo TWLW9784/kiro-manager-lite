@@ -57,18 +57,32 @@ function action_sync(): never
         $stats['superseded'] += $supersede->rowCount();
     }
 
-    $resolve = $pdo->prepare(
-        "UPDATE links SET status = ?, paid_at = IF(? = 'paid', COALESCE(paid_at, ?), paid_at),
-                refresh_reason = IF(? = 'refresh', 'expired', refresh_reason), updated_at = ?
+    /*
+     * 回报付款结果。已付：也可以是已下架（superseded）但被客户领过的旧链接——
+     * 客户手里还留着旧链接（TXT、截图）照样能付，不记的话结算会漏。
+     * 一个号只能记一条已付：已经有一条了，这条就按失效处理，免得重复结算。
+     */
+    $paidOf = $pdo->prepare("SELECT COUNT(*) FROM links WHERE account_ref = (SELECT account_ref FROM links WHERE url_hash = ?) AND status = 'paid'");
+    $markPaid = $pdo->prepare(
+        "UPDATE links SET status = 'paid', paid_at = COALESCE(paid_at, ?), refresh_reason = NULL, updated_at = ?
+         WHERE url_hash = ? AND (status IN ('checking', 'claimed', 'available', 'refresh')
+                                 OR (status = 'superseded' AND claimed_at IS NOT NULL))"
+    );
+    $markExpired = $pdo->prepare(
+        "UPDATE links SET status = 'refresh', refresh_reason = 'expired', updated_at = ?
          WHERE url_hash = ? AND status IN ('checking', 'claimed', 'available', 'refresh')"
     );
     foreach ((array) ($in['resolve'] ?? []) as $item) {
         $hash = (string) ($item['url_hash'] ?? '');
         $result = (string) ($item['result'] ?? '');
         if (!preg_match('/^[a-f0-9]{64}$/', $hash) || !in_array($result, ['paid', 'expired'], true)) continue;
-        $next = $result === 'paid' ? 'paid' : 'refresh';
-        $resolve->execute([$next, $next, $t, $next, $t, $hash]);
-        $stats['resolved'] += $resolve->rowCount();
+        if ($result === 'paid') {
+            $paidOf->execute([$hash]);
+            if ((int) $paidOf->fetchColumn() > 0) $result = 'expired';
+        }
+        $stmt = $result === 'paid' ? $markPaid : $markExpired;
+        $stmt->execute($result === 'paid' ? [$t, $t, $hash] : [$t, $hash]);
+        $stats['resolved'] += $stmt->rowCount();
     }
 
     /*
@@ -92,7 +106,11 @@ function action_sync(): never
     $links = $pdo->query(
         "SELECT url_hash, account_ref, tier, amount_due, status, refresh_reason, claimed_at, paid_at, stripe_status
          FROM links WHERE status IN ('available', 'claimed', 'checking', 'refresh')
-            OR (status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL 3 DAY))"
+            OR (status = 'paid' AND paid_at >= DATE_SUB(NOW(), INTERVAL 3 DAY))
+            -- 被领过又下架的旧链接：桌面端发现号已付费时据此补记已付
+            -- 已经有一条记成已付的号不再返回，免得桌面端每轮重复回报
+            OR (status = 'superseded' AND claimed_at IS NOT NULL AND updated_at >= DATE_SUB(NOW(), INTERVAL 14 DAY)
+                AND NOT EXISTS (SELECT 1 FROM links p WHERE p.account_ref = links.account_ref AND p.status = 'paid'))"
     )->fetchAll();
 
     close_done_orders();
