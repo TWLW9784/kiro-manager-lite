@@ -1,12 +1,14 @@
 <script setup lang="ts">
-/** 总览：桌面端状态、各状态汇总、客户结算概况、近 14 天已付款 */
-import { computed } from 'vue'
+/** 总览：要处理的事、各状态汇总、进行中的批次、近 14 天已付款 */
+import { computed, onMounted, ref } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
-import { guard } from '@site/shared/api'
-import { LINK_STATUS, num, short, usd, walletFresh } from '@site/shared/format'
-import { clients, desktopAgo, loadClients, loadOverview, overview, type AdminClient } from '../state'
+import { api, guard } from '@site/shared/api'
+import { LINK_STATUS, num, usd, walletFresh } from '@site/shared/format'
+import { clients, desktopAgo, loadClients, loadOverview, overview, type AdminClient, type AdminOrder } from '../state'
 
-const emit = defineEmits<{ goto: [view: 'orders' | 'settlements' | 'links', params?: Record<string, unknown>] }>()
+const emit = defineEmits<{
+  goto: [view: 'orders' | 'settlements' | 'links' | 'clients', params?: Record<string, unknown>]
+}>()
 
 const totals = computed(() => {
   const out: Record<string, { n: number; usd: number; cny: number }> = {}
@@ -23,7 +25,14 @@ const today = computed(() => (overview.value?.now ?? '').slice(0, 10))
 const paidToday = computed(() =>
   (overview.value?.daily ?? []).filter((d) => d.day === today.value).reduce((n, d) => n + num(d.n), 0)
 )
-const unsettledTotal = computed(() => Math.max(0, num(overview.value?.settle.due) - num(overview.value?.settle.settled)))
+/**
+ * 你欠客户的、你预付在外的：按客户分别算再加总。
+ * 原来是「全部应付 − 全部已付」，一个客户的预付会把另一个客户的欠款抵掉
+ * （client 预付 $108 把 客户2 $80 + kycduke $44 抵成了「未结 $0」），
+ * 而那两笔钱其实还得付。
+ */
+const owedTotal = computed(() => clients.value.reduce((s, c) => s + Math.max(0, -num(c.balance)), 0))
+const prepaidTotal = computed(() => clients.value.reduce((s, c) => s + Math.max(0, num(c.balance)), 0))
 
 /**
  * 近 14 天：客户 × 日期。
@@ -56,10 +65,43 @@ const perClient = computed(() => {
   return [...out.values()].sort((a, b) => Number(a.none) - Number(b.none) || b.total - a.total)
 })
 
+/** 进行中的批次（总览只列一个短表，详情去批次页） */
+const openOrders = ref<AdminOrder[]>([])
+async function loadOpen(): Promise<void> {
+  openOrders.value = (await api.admin<{ orders: AdminOrder[] }>('orders', { status: 'open', page: 1, page_size: 50 })).orders
+}
+onMounted(() => void guard(loadOpen))
+
 const reload = (): void =>
   void guard(async () => {
-    await Promise.all([loadOverview(), loadClients()])
+    await Promise.all([loadOverview(), loadClients(), loadOpen()])
   })
+
+/**
+ * 要处理的事：每条一句话 + 一个按钮。替代原来那张 10 列的「客户结算概况」大表
+ * （和客户页完全重复）。桌面端没同步、确认中卡住这两条已经在页面最上方单独提醒。
+ */
+interface Todo { key: string; level: 'danger' | 'warning' | 'info'; text: string; action: string; go: () => void }
+const todos = computed<Todo[]>(() => {
+  const out: Todo[] = []
+  const busy = new Set(openOrders.value.map((o) => o.client_id))
+  const name = (c: AdminClient): string => c.display_name || c.username
+  for (const c of clients.value) {
+    if (!c.enabled) continue
+    const b = num(c.balance)
+    const open = (): void => emit('goto', 'clients', { clientId: c.id })
+    if (b < -0.004) out.push({ key: `owe${c.id}`, level: 'warning', text: `你欠 ${name(c)} ${usd(-b)}`, action: '去打款', go: open })
+    if (c.wallet_address && walletFresh(c.wallet_updated_at))
+      out.push({ key: `fresh${c.id}`, level: 'danger', text: `${name(c)} 的收款地址 24 小时内改过，打款前先跟他确认`, action: '查看', go: open })
+    if (busy.has(c.id) && !c.wallet_address)
+      out.push({ key: `nowal${c.id}`, level: 'info', text: `${name(c)} 有进行中的批次，但还没填收款地址`, action: '查看', go: open })
+    else if (busy.has(c.id) && c.wallet_network !== 'polygon')
+      out.push({ key: `net${c.id}`, level: 'danger', text: `${name(c)} 填的不是 Polygon 地址，别往这个地址打款`, action: '查看', go: open })
+  }
+  const rank = { danger: 0, warning: 1, info: 2 }
+  return out.sort((a, b) => rank[a.level] - rank[b.level])
+})
+const pct = (r: AdminOrder): number => Math.min(100, Math.round((num(r.paid) / Math.max(1, r.quantity)) * 100))
 const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
 </script>
 
@@ -97,13 +139,11 @@ const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
       <div class="stat-sub">Stripe 检查 {{ overview?.last_stripe_check?.slice(11) ?? '-' }}</div>
     </el-card>
     <el-card shadow="never">
-      <div class="stat-label"><el-tag size="small" type="primary">已结 / 应付客户</el-tag></div>
+      <div class="stat-label"><el-tag size="small" type="primary">已付客户</el-tag></div>
       <div class="stat-value primary">{{ usd(overview?.settle.settled) }}</div>
       <div class="stat-sub">
-        <span class="nowrap">应付 {{ usd(overview?.settle.due) }}</span> ·
-        <span class="nowrap">
-          未结 <b :class="unsettledTotal > 0 ? 'warn' : ''">{{ usd(unsettledTotal) }}</b>
-        </span>
+        <span class="nowrap">你欠 <b :class="owedTotal > 0.004 ? 'warn' : ''">{{ usd(owedTotal) }}</b></span> ·
+        <span class="nowrap">预付在外 {{ usd(prepaidTotal) }}</span>
       </div>
     </el-card>
     <el-card shadow="never">
@@ -115,80 +155,51 @@ const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
     </el-card>
   </div>
 
+  <!-- 要处理的事：替代原来和客户页重复的「客户结算概况」大表 -->
   <el-card shadow="never">
     <template #header>
       <div class="card-head">
-        <h2>客户结算概况</h2>
-        <el-button size="small" @click="emit('goto', 'settlements')">去结算</el-button>
+        <h2>要处理的事<span v-if="todos.length" class="muted small"> {{ todos.length }}</span></h2>
         <el-button size="small" :icon="Refresh" @click="reload" />
       </div>
     </template>
-    <el-table :data="clients" size="small">
-      <el-table-column label="客户" min-width="140">
+    <ul v-if="todos.length" class="todos">
+      <li v-for="t in todos" :key="t.key" :class="t.level">
+        <span class="dot" aria-hidden="true" />
+        <span class="todo-text">{{ t.text }}</span>
+        <el-button size="small" :type="t.level === 'info' ? 'default' : 'primary'" plain @click="t.go">{{ t.action }}</el-button>
+      </li>
+    </ul>
+    <el-empty v-else :image-size="56" description="没有要处理的事" />
+  </el-card>
+
+  <el-card shadow="never">
+    <template #header>
+      <div class="card-head">
+        <h2>进行中的批次<span class="muted small"> {{ openOrders.length }}</span></h2>
+        <el-button size="small" @click="emit('goto', 'orders')">全部批次</el-button>
+      </div>
+    </template>
+    <el-table :data="openOrders" size="small" @row-click="(r: AdminOrder) => emit('goto', 'orders', { orderId: r.id })">
+      <el-table-column label="批次" min-width="200">
         <template #default="{ row }">
-          <b>{{ row.display_name || row.username }}</b>
-          <div class="muted small">{{ row.username }}</div>
+          <el-link type="primary" :underline="false">{{ row.code }}</el-link>
+          <div class="small"><b>{{ row.client ?? '-' }}</b><span class="muted"> · {{ row.tier }}</span></div>
         </template>
       </el-table-column>
-      <el-table-column label="待付" width="72" align="right">
-        <template #default="{ row }">{{ num(row.claimed) }}</template>
-      </el-table-column>
-      <el-table-column label="已付" width="100" align="right">
+      <el-table-column label="进度" min-width="220">
         <template #default="{ row }">
-          {{ num(row.paid) }}
-          <div class="muted small">今日 {{ num(row.paid_today) }}</div>
+          <el-progress :percentage="pct(row)" :show-text="false" />
+          <span class="small muted">完成 <b class="ok">{{ num(row.paid) }}</b> / {{ row.quantity }} · 待付 {{ num(row.holding) }}</span>
         </template>
       </el-table-column>
-      <el-table-column label="付客户" width="110" align="right">
+      <el-table-column label="已付 / 完成价值" min-width="150" align="right">
         <template #default="{ row }">
-          <span class="num">{{ usd(row.due) }}</span>
-          <div v-if="row.unit_price !== null" class="muted small">每条 {{ usd(row.unit_price) }}</div>
+          <span class="num">{{ usd(row.settled_amount) }}</span>
+          <div class="muted small">{{ usd(row.due_amount) }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="客户实付" width="96" align="right">
-        <template #default="{ row }"><span class="muted num">{{ usd(row.client_paid) }}</span></template>
-      </el-table-column>
-      <el-table-column label="客户赚" width="96" align="right">
-        <template #default="{ row }">
-          <b :class="num(row.client_profit) >= 0 ? 'ok' : 'danger'">{{ usd(row.client_profit) }}</b>
-        </template>
-      </el-table-column>
-      <el-table-column label="已付客户" width="100" align="right">
-        <template #default="{ row }"><span class="ok num">{{ usd(row.settled) }}</span></template>
-      </el-table-column>
-      <el-table-column label="余额" width="110" align="right">
-        <template #default="{ row }">
-          <el-tag v-if="Math.abs(num(row.balance)) < 0.005" size="small" type="success">已结清</el-tag>
-          <template v-else-if="num(row.balance) > 0">
-            <b class="primary">+{{ num(row.balance).toFixed(2) }}</b>
-            <div class="muted small">已预付</div>
-          </template>
-          <template v-else>
-            <b class="warn">{{ usd(-num(row.balance)) }}</b>
-            <div class="muted small">待结算</div>
-          </template>
-        </template>
-      </el-table-column>
-      <el-table-column label="收款地址" min-width="180">
-        <template #default="{ row }">
-          <template v-if="row.wallet_address">
-            <el-tooltip :content="row.wallet_address" placement="top">
-              <span class="mono">{{ short(row.wallet_address) }}</span>
-            </el-tooltip>
-            <el-tag v-if="row.wallet_network !== 'polygon'" size="small" type="danger">不是 Polygon</el-tag>
-            <el-tag v-else-if="walletFresh(row.wallet_updated_at)" size="small" type="danger">24h 内改过</el-tag>
-          </template>
-          <el-tag v-else size="small" type="warning">未设置</el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column min-width="100" align="right">
-        <template #default="{ row }">
-          <el-button size="small" text type="primary" @click="emit('goto', 'orders', { clientId: row.id, settle: 'unsettled' })">
-            未结批次
-          </el-button>
-        </template>
-      </el-table-column>
-      <template #empty><el-empty description="还没有客户" /></template>
+      <template #empty><el-empty :image-size="56" description="没有进行中的批次，去「批次」派单" /></template>
     </el-table>
   </el-card>
 
@@ -217,4 +228,16 @@ const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
 
 <style scoped>
 .head { margin: 0; font-size: 15px; font-weight: 600; }
+/* 要处理的事：一行一件，左边圆点标轻重，右边一个按钮 */
+.todos { list-style: none; margin: 0; padding: 0; }
+.todos li {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 0; border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.todos li:last-child { border-bottom: none; }
+.todo-text { flex: 1 1 auto; min-width: 0; line-height: 1.5; }
+.dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--el-color-info); }
+.danger .dot { background: var(--el-color-danger); }
+.warning .dot { background: var(--el-color-warning); }
+:deep(.el-table__row) { cursor: pointer; }
 </style>

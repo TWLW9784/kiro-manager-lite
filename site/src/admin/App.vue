@@ -5,7 +5,8 @@ import { Close, DataLine, Document, Expand, Link, List, Sort, User } from '@elem
 // Element Plus 自带的文字（分页「50/page」、日期选择器、「No Data」）默认是英文
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { guard } from '@site/shared/api'
-import { loadClients, loadOverview, overview } from './state'
+import { num } from '@site/shared/format'
+import { clients, loadClients, loadOverview, overview } from './state'
 import OverviewView from './views/OverviewView.vue'
 import OrdersView from './views/OrdersView.vue'
 import SettlementsView from './views/SettlementsView.vue'
@@ -18,19 +19,24 @@ type View = (typeof VIEWS)[number]
 const TITLES: Record<View, string> = {
   overview: '总览',
   orders: '批次',
-  settlements: '结算',
+  settlements: '打款记录',
   clients: '客户',
   links: '链接',
   logs: '日志'
 }
+// 上面三个是每天用的（付款 → 派单 → 看客户完成），下面三个是查记录用的
 const NAV: { key: View; icon: unknown }[] = [
   { key: 'overview', icon: DataLine },
   { key: 'orders', icon: Document },
+  { key: 'clients', icon: User }
+]
+const NAV_RECORDS: { key: View; icon: unknown }[] = [
   { key: 'settlements', icon: Sort },
-  { key: 'clients', icon: User },
   { key: 'links', icon: Link },
   { key: 'logs', icon: List }
 ]
+/** 你欠钱的客户数（侧栏「客户」上的红点）。先付款的流程里批次在完成前本来就是「未结」，那个数不说明问题 */
+const owedClients = computed(() => clients.value.filter((c) => c.enabled && num(c.balance) < -0.004).length)
 
 const hash = location.hash.slice(1) as View
 const view = ref<View>(VIEWS.includes(hash) ? hash : 'overview')
@@ -92,19 +98,20 @@ onUnmounted(() => clearInterval(timer))
           <template #title>
             <span>{{ TITLES[item.key] }}</span>
             <el-badge
-              v-if="item.key === 'settlements' && overview?.settle.unsettled_orders"
-              :value="overview.settle.unsettled_orders"
-              type="danger"
-              class="nav-badge"
-            />
-            <el-badge
-              v-else-if="item.key === 'orders' && overview?.settle.open_orders"
+              v-if="item.key === 'orders' && overview?.settle.open_orders"
               :value="overview.settle.open_orders"
               type="info"
               class="nav-badge"
             />
+            <el-badge v-else-if="item.key === 'clients' && owedClients" :value="owedClients" type="danger" class="nav-badge" />
           </template>
         </el-menu-item>
+        <el-menu-item-group title="记录">
+          <el-menu-item v-for="item in NAV_RECORDS" :key="item.key" :index="item.key">
+            <el-icon><component :is="item.icon" /></el-icon>
+            <template #title>{{ TITLES[item.key] }}</template>
+          </el-menu-item>
+        </el-menu-item-group>
       </el-menu>
 
       <div class="sidebar-foot">
@@ -134,7 +141,7 @@ onUnmounted(() => clearInterval(timer))
           @goto="go"
         />
         <SettlementsView v-else-if="view === 'settlements'" @goto="go" />
-        <ClientsView v-else-if="view === 'clients'" @goto="go" />
+        <ClientsView v-else-if="view === 'clients'" :client-id="jump.clientId" @goto="go" />
         <LinksView v-else-if="view === 'links'" :client-id="jump.clientId" :status="jump.linkStatus" />
         <LogsView v-else />
       </main>

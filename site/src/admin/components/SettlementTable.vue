@@ -113,7 +113,7 @@ async function remove(s: Settlement): Promise<void> {
       </template>
     </el-table-column>
     <template #empty>
-      <el-empty description="还没有打款记录，打完款点「记一笔打款」，附上交易哈希或截图" />
+      <el-empty description="还没有打款记录。打完款点「记一笔打款」记下来，交易哈希、截图都选填" />
     </template>
   </el-table>
 </template>

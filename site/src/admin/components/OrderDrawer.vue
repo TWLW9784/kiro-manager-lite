@@ -1,11 +1,11 @@
 <script setup lang="ts">
-/** 批次详情：进度、客户收款地址、结算状态、打款记录、链接、批次操作 */
+/** 批次详情：一句话概况、进度、客户收款地址、单价、打款记录、链接、批次操作 */
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument, Plus } from '@element-plus/icons-vue'
 import PaylinkUrl from '@site/shared/PaylinkUrl.vue'
 import { api, guard } from '@site/shared/api'
-import { LINK_STATUS, ORDER_STATUS, SETTLE_STATUS, cny, copyText, dt, networkName, num, usd, walletFresh } from '@site/shared/format'
+import { LINK_STATUS, ORDER_STATUS, cny, copyText, dt, networkName, num, usd, walletFresh } from '@site/shared/format'
 import { drawerSize, useViewport } from '@site/shared/responsive'
 import type { AdminOrder } from '../state'
 import SettlementTable, { type Settlement } from './SettlementTable.vue'
@@ -33,8 +33,9 @@ const links = ref<Link[]>([])
 const settlements = ref<Settlement[]>([])
 const filter = ref('all')
 const paying = ref(false)
-const savingSettle = ref(false)
-const form = ref({ settle_status: 'unsettled', settled_amount: 0, settle_note: '', unit_price: null as number | null })
+const savingPrice = ref(false)
+// 已结金额只由打款记录累加，不再手改；这里只留单价可以改
+const price = ref<number | null>(null)
 const qty = ref<number | null>(null)
 
 async function load(): Promise<void> {
@@ -51,12 +52,7 @@ async function load(): Promise<void> {
     const rank: Record<string, number> = { claimed: 0, checking: 1, paid: 2, refresh: 3, superseded: 4 }
     links.value = l.links.sort((a, b) => (rank[a.status] ?? 9) - (rank[b.status] ?? 9) || a.id - b.id)
     settlements.value = s.settlements
-    form.value = {
-      settle_status: row.settle_status,
-      settled_amount: num(row.settled_amount),
-      settle_note: row.settle_note || '',
-      unit_price: row.unit_price === null ? null : num(row.unit_price)
-    }
+    price.value = row.unit_price === null ? null : num(row.unit_price)
   } finally {
     loading.value = false
   }
@@ -72,27 +68,36 @@ const count = (s: string): number => links.value.filter((l) => l.status === s).l
 const shown = computed(() => (filter.value === 'all' ? links.value : links.value.filter((l) => l.status === filter.value)))
 const unpaid = computed(() => links.value.filter((l) => l.status === 'claimed' || l.status === 'checking'))
 const due = computed(() => num(order.value?.due_amount))
-const left = computed(() => Math.max(0, due.value - num(order.value?.settled_amount)))
 const walletOk = computed(() => order.value?.wallet_address && order.value.wallet_network === 'polygon')
 
-async function saveSettle(): Promise<void> {
-  savingSettle.value = true
+/** 只改单价。服务端 order_settle 只收到 unit_price 时会按新单价重算结算状态 */
+async function savePrice(): Promise<void> {
+  savingPrice.value = true
   try {
     await guard(async () => {
-      await api.admin('order_settle', {
-        id: props.orderId,
-        settle_status: form.value.settle_status,
-        settled_amount: form.value.settled_amount,
-        settle_note: form.value.settle_note,
-        unit_price: form.value.unit_price ?? ''
-      })
-      ElMessage.success('结算状态已保存')
+      await api.admin('order_settle', { id: props.orderId, unit_price: price.value ?? '' })
+      ElMessage.success('单价已修改')
       await reload()
     })
   } finally {
-    savingSettle.value = false
+    savingPrice.value = false
   }
 }
+
+/** 一句话说清楚这批的钱和进度 */
+const summary = computed(() => {
+  const o = order.value
+  if (!o) return ''
+  const paid = num(o.paid)
+  const parts = [`已付客户 ${usd(o.settled_amount)}`]
+  parts.push(
+    o.unit_price !== null
+      ? `完成 ${paid} / ${o.quantity}（价值 ${usd(o.due_amount)} / ${usd(o.quantity * num(o.unit_price))}）`
+      : `完成 ${paid} / ${o.quantity}（按实付 ${usd(o.due_amount)}）`
+  )
+  if (o.status === 'open' && o.quantity > paid) parts.push(`还差 ${o.quantity - paid} 个`)
+  return parts.join(' · ')
+})
 
 async function confirmThen(title: string, message: string, fn: () => Promise<void>, danger = true): Promise<void> {
   try {
@@ -174,6 +179,8 @@ async function copyUnpaid(): Promise<void> {
 
     <div v-loading="loading" class="body">
       <template v-if="order">
+        <!-- 一句话说清楚：付了多少、做完多少、还差几个 -->
+        <div class="summary">{{ summary }}</div>
         <div class="stats">
           <el-card shadow="never">
             <div class="stat-label">已付</div>
@@ -246,33 +253,15 @@ async function copyUnpaid(): Promise<void> {
             </el-descriptions>
           </el-card>
 
+          <!-- 原来这里能手改「结算状态」和「已结金额」，和打款记录是两条口子，账容易对不上。
+               现在已结金额只由下面的打款记录累加，这里只留单价可改 -->
           <el-card shadow="never">
-            <template #header><h2 class="head">结算状态</h2></template>
-            <el-form label-position="top">
-              <div class="two-col">
-                <el-form-item label="状态">
-                  <el-select v-model="form.settle_status">
-                    <el-option v-for="(m, k) in SETTLE_STATUS" :key="k" :value="k" :label="m.text" />
-                  </el-select>
-                </el-form-item>
-                <el-form-item label="已结金额（USD）">
-                  <el-input-number v-model="form.settled_amount" :min="0" :precision="2" controls-position="right" class="full" />
-                </el-form-item>
-              </div>
-              <el-form-item label="每条结算单价（USD）">
-                <el-input-number v-model="form.unit_price" :min="0" :max="1000" :precision="2" placeholder="留空 = 按客户实付" class="full" />
-                <div class="muted small">
-                  {{ form.unit_price == null ? '留空 = 按客户实付金额' : `付客户 = 已付条数 × ${usd(form.unit_price)}，差额是客户赚的` }}
-                </div>
-              </el-form-item>
-              <el-form-item label="结算备注">
-                <el-input v-model="form.settle_note" maxlength="255" placeholder="如：按 1:1 结算，扣手续费 1 USDT" />
-              </el-form-item>
-              <div class="row">
-                <el-button type="primary" :loading="savingSettle" @click="saveSettle">保存结算状态</el-button>
-                <span class="muted small">记一笔打款会自动累加并判断：超过应付 = 已预付</span>
-              </div>
-            </el-form>
+            <template #header><h2 class="head">每个多少钱</h2></template>
+            <el-input-number v-model="price" :min="0" :max="1000" :precision="2" placeholder="不填 = 按客户实付" class="full" />
+            <div class="muted small price-hint">
+              {{ price == null ? '不填 = 按客户在 Stripe 实际付的钱结' : `应付客户 = 完成数 × ${usd(price)}` }}
+            </div>
+            <el-button :loading="savingPrice" @click="savePrice">保存单价</el-button>
           </el-card>
         </div>
 
@@ -364,6 +353,15 @@ async function copyUnpaid(): Promise<void> {
 .seg { margin-bottom: 10px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .qty { width: 130px; }
+/* 顶部那句「已付客户 $200 · 完成 16/20 · 还差 4 个」 */
+.summary {
+  padding: 10px 14px;
+  border-radius: var(--el-border-radius-base);
+  background: var(--el-color-primary-light-9);
+  color: var(--el-text-color-primary);
+  line-height: 1.6;
+}
+.price-hint { margin: 6px 0 10px; }
 @media (max-width: 900px) {
   .two, .two-col { grid-template-columns: 1fr; }
 }

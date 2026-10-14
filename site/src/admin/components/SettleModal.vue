@@ -193,7 +193,7 @@ async function submit(): Promise<void> {
       <el-form-item label="交易哈希（选填）">
         <el-input v-model="form.tx_hash" class="mono-input" placeholder="0x…（Polygon 上 66 位）" spellcheck="false" />
       </el-form-item>
-      <el-form-item label="付款凭证（选填）">
+      <el-form-item label="打款凭证（选填）">
         <el-upload
           :file-list="fileList"
           :before-upload="beforeUpload"
