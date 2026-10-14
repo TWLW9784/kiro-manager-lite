@@ -126,6 +126,7 @@ async function viewLinks() {
       <label class="small text-2">付款从 <input type="date" data-lk="from" value="${esc(f.from)}"></label>
       <label class="small text-2">到 <input type="date" data-lk="to" value="${esc(f.to)}"></label>
       ${f.order_id ? '<button class="btn sm" data-lk-clear-order>只看当前批次 ✕</button>' : ''}
+      ${['client_id', 'status', 'tier', 'q', 'from', 'to'].some((k) => f[k]) ? '<button class="btn sm" data-lk-reset>重置筛选</button>' : ''}
       <span class="grow"></span>
       <button class="btn sm" data-lk-copy>复制本页</button>
       <button class="btn sm danger" data-lk-revoke>收回所选</button>
@@ -149,6 +150,43 @@ async function viewLinks() {
 }
 
 // ============ 日志 ============
+/** 日志字段 / 值的中文名：和桌面端 PaylinksLogsPane 一致 */
+const LOG_FIELD = {
+  id: 'id', code: '批次', client_id: '客户 id', username: '账号', display_name: '名称', order_id: '批次 id',
+  quantity: '目标付款数', tier: '档位', unit_price: '每条单价', replace_limit: '可更换次数', note: '备注',
+  settle_status: '结算状态', settled_amount: '已结金额', settle_note: '结算备注', amount: '金额', token: '币种',
+  network: '网络', to: '收款地址', from: '原地址', tx: '交易哈希', proof: '凭证', status: '状态',
+  enabled: '启用', links: '链接数', revoked: '收回', resolved: '定性', ids: '链接 id', result: '结果',
+  claim_timeout_minutes: '领取时限', max_claim: '单次最多', assigned: '已分配'
+}
+const LOG_VALUE = {
+  unsettled: '未结算', partial: '部分结算', settled: '已结算', open: '进行中', done: '已完成', cancelled: '已取消',
+  paid: '已付款', expired: '失效', true: '是', false: '否',
+  polygon: 'Polygon', ethereum: 'Ethereum', bsc: 'BNB Chain', arbitrum: 'Arbitrum', tron: 'Tron'
+}
+const mins = (m) => (m % 1440 === 0 ? `${m / 1440} 天` : m % 60 === 0 ? `${m / 60} 小时` : `${m} 分钟`)
+/** {"id":16,"settle_status":"unsettled"} → 字段 值 … 空值不显示 */
+function logFields(detail) {
+  let o
+  try {
+    o = JSON.parse(detail)
+  } catch {
+    return `<span class="mono">${esc(detail)}</span>`
+  }
+  return Object.entries(o)
+    .filter(([, v]) => v !== '' && v !== null && v !== undefined)
+    .map(([k, v]) => {
+      const label = LOG_FIELD[k] ?? k
+      const val = Array.isArray(v)
+        ? `${v.length} 条`
+        : k === 'claim_timeout_minutes'
+          ? mins(Number(v))
+          : LOG_VALUE[String(v)] ?? (String(v).length > 22 ? `${String(v).slice(0, 10)}…${String(v).slice(-8)}` : String(v))
+      return `<span class="logf"><span class="muted">${esc(label)}</span><b>${esc(val)}</b></span>`
+    })
+    .join('')
+}
+
 const OPS = {
   client_save: '保存客户', client_delete: '删除客户', client_kick: '强制下线', link_revoke: '收回链接', link_resolve: '手动定性',
   order_create: '派单', order_update: '修改批次', order_settle: '修改结算', settlement_add: '记录打款', settlement_delete: '删除打款',
@@ -167,7 +205,7 @@ async function viewLogs() {
         <td data-label="操作"><span class="badge ${l.op === 'wallet_save' ? 'danger' : l.op.startsWith('settlement') || l.op === 'order_settle' ? 'primary' : 'plain'}">${esc(OPS[l.op] ?? l.op)}</span></td>
         <td data-label="操作人" class="small">${l.actor === 'desktop' ? '桌面端' : esc(l.actor)}</td>
         <td data-label="IP" class="small mono">${esc(l.ip)}</td>
-        <td data-label="内容" class="url"><span class="mono" title="${esc(l.detail)}">${esc(l.detail)}</span></td>
+        <td data-label="内容" title="${esc(l.detail)}"><span class="logfs">${logFields(l.detail)}</span></td>
       </tr>`).join('')}</tbody></table></div>` : empty('还没有操作记录')}
     <div class="pager" id="logs-pager"></div>
   </div>`
@@ -222,13 +260,21 @@ document.addEventListener('click', async (e) => {
     if (!(await confirm(paid ? '确认已付' : '确认失效', paid ? '记成已付款，计入客户结算。' : '记成失效，进入待换新。', { ok: '确定', cancel: '取消', danger: !paid }))) return
     return guard(async () => { await adm('link_resolve', { id: Number(rs.dataset.id), result: rs.dataset.resolve }); toast('已定性', 'ok'); viewLinks() })
   }
-  if (t.closest('[data-lk-clear-order]')) { A.links.order_id = ''; A.links.page = 1; return render() }
+  if (t.closest('[data-lk-clear-order]')) { A.links.order_id = ''; delete A.links.include_void; A.links.page = 1; return render() }
+  if (t.closest('[data-lk-reset]')) {
+    Object.assign(A.links, { page: 1, client_id: '', status: '', tier: '', q: '', from: '', to: '' })
+    return render()
+  }
   if (t.closest('[data-lk-copy]')) { if (!A.linkUrls?.length) return toast('本页没有链接'); await copy(A.linkUrls.join('\n')); return toast(`已复制 ${A.linkUrls.length} 条`, 'ok') }
   if (t.closest('[data-lk-revoke]')) {
     const ids = [...document.querySelectorAll('.lk-sel:checked')].map((x) => Number(x.value))
     if (!ids.length) return toast('先勾选要收回的链接')
     if (!(await confirm('收回链接', `收回 ${ids.length} 条？旧链接作废，桌面端下一轮换新上架。`, { ok: '收回', cancel: '取消', danger: true }))) return
     return guard(async () => { const r = await adm('link_revoke', { ids }); toast(`已收回 ${r.revoked} 条`, 'ok'); viewLinks() })
+  }
+  if (t.closest('[data-of-reset]')) {
+    Object.assign(A.orders, { page: 1, status: 'open', settle: '', client_id: '', q: '' })
+    return render()
   }
   const of = t.closest('[data-of][data-v]')
   if (of) { A.orders[of.dataset.of] = of.dataset.v; A.orders.page = 1; return render() }
@@ -243,6 +289,19 @@ document.addEventListener('change', (e) => {
     state[el.getAttribute(attr)] = el.value.trim()
     state.page = 1
     return render()
+  }
+})
+// 搜索框：边打边筛（400ms 防抖），回车也立即生效
+const searchNow = UI.debounce((attr, state, value) => {
+  state[attr] = value
+  state.page = 1
+  render()
+}, 400)
+document.addEventListener('input', (e) => {
+  const el = e.target
+  if (!el.matches('input[type="search"]')) return
+  for (const [attr, state] of [['data-of', A.orders], ['data-lk', A.links]]) {
+    if (el.hasAttribute(attr)) return searchNow(el.getAttribute(attr), state, el.value.trim())
   }
 })
 document.addEventListener('keydown', (e) => {

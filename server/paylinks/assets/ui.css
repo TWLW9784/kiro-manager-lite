@@ -327,3 +327,15 @@ table.table { width: 100%; border-collapse: collapse; }
   .table.stack td.c-check::before { display: none; }
   .table.stack tr { position: relative; }
 }
+
+/* 顶部加载条：请求期间显示，内容区轻微淡化，避免「闪一下空白」 */
+.load-bar { position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 70; background: transparent; overflow: hidden; pointer-events: none; }
+.load-bar.on::after {
+  content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--primary), transparent);
+  animation: sweep 0.9s linear infinite;
+}
+@keyframes sweep { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+.content.busy { opacity: 0.6; transition: opacity 0.15s 0.12s; }
+/* 侧栏「我的批次」有可领额度时标出来 */
+.nav-item .count.hot { background: var(--warn); color: #fff; font-weight: 600; }
+.nav-item.active .count.hot { background: var(--warn); }

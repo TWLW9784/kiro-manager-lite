@@ -53,6 +53,11 @@ async function loadMe() {
   $('#updated').textContent = t('updated_at', { time: S.me.now.slice(11, 16) })
   $('#nav-pending').textContent = S.me.stats.claimed || ''
   $('#nav-orders').textContent = S.me.stats.open_orders || ''
+  // 有能领的额度：侧栏「我的批次」标出来，别让客户不知道有新批次
+  const can = S.me.stats.claimable || 0
+  const navOrders = $('#nav-orders')
+  navOrders.textContent = can ? `+${can}` : S.me.stats.open_orders || ''
+  navOrders.classList.toggle('hot', can > 0)
 }
 
 // ============ 付款工作台：领链接 + 待付款，打开就能复制 ============
@@ -108,6 +113,10 @@ async function viewWork() {
 
   $('[data-section="work"]').innerHTML = `
     ${walletNotice()}
+    <div class="page-head">
+      <span class="small text-2">${esc(t('updated_at', { time: S.me.now.slice(11, 16) }))}</span>
+      <button class="btn sm" data-reload>${esc(t('refresh'))}</button>
+    </div>
     <div class="stats">
       <div class="card stat accent-warn"><span class="stat-label">${esc(t('stat_pending'))}</span><span class="stat-value">${s.claimed + s.checking}</span>
         <span class="stat-sub">${s.checking ? esc(t('stat_checking_n', { n: s.checking })) : esc(t('stat_pending_sub'))}</span></div>
@@ -355,6 +364,10 @@ async function viewPaid() {
   const r = await api.get('my_paid', { page: f.page, page_size: f.size, from: f.from, to: f.to })
   $('[data-section="paid"]').innerHTML = `<div class="card">
     <div class="toolbar">
+      <div class="seg" role="group">
+        ${[['', t('range_all')], ['today', t('range_today')], ['7d', t('range_7d')], ['30d', t('range_30d')]]
+          .map(([v, label]) => `<button data-range="${v}" class="${(f.range ?? '') === v ? 'active' : ''}">${esc(label)}</button>`).join('')}
+      </div>
       <label class="small text-2">${esc(t('from'))} <input type="date" data-df="from" value="${esc(f.from)}"></label>
       <label class="small text-2">${esc(t('to'))} <input type="date" data-df="to" value="${esc(f.to)}"></label>
       <span class="grow"></span>
@@ -486,8 +499,21 @@ document.addEventListener('click', (e) => {
   if (c) return copy(c.dataset.copy).then(() => toast(t('copied', { n: 1 }), 'ok'))
   const rep = e.target.closest('[data-replace]')
   if (rep) return replaceLink(rep.dataset.replace, render)
+  if (e.target.closest('[data-reload]')) return render()
   const cn = e.target.closest('[data-claim-now]')
   if (cn) return claimFrom(cn)
+  const rg = e.target.closest('[data-range]')
+  if (rg) {
+    const v = rg.dataset.range
+    const day = (d) => new Date(Date.now() + d * 864e5 - new Date().getTimezoneOffset() * 6e4).toISOString().slice(0, 10)
+    Object.assign(S.paid, {
+      range: v,
+      from: v === 'today' ? day(0) : v === '7d' ? day(-6) : v === '30d' ? day(-29) : '',
+      to: v ? day(0) : '',
+      page: 1
+    })
+    return render()
+  }
   const pa = e.target.closest('[data-pa]')
   if (pa) return guard(() => pendingAction(pa.dataset.pa))
   const sf = e.target.closest('[data-f][data-v]')
@@ -506,7 +532,7 @@ document.addEventListener('change', (e) => {
   } else if (el.matches('[data-pf]')) {
     S.pending.order_id = el.value; S.pending.page = 1; render()
   } else if (el.matches('[data-df]')) {
-    S.paid[el.dataset.df] = el.value; S.paid.page = 1; render()
+    S.paid[el.dataset.df] = el.value; S.paid.range = ''; S.paid.page = 1; render()
   }
 })
 $('#logout').addEventListener('click', async () => {

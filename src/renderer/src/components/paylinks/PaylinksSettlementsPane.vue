@@ -6,7 +6,7 @@ import { CopyOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons-vu
 import PaylinksSettleModal from '@/components/paylinks/PaylinksSettleModal.vue'
 import PaylinksSettlementTable from '@/components/paylinks/PaylinksSettlementTable.vue'
 import { copyText } from '@/utils/ui'
-import { networkName, paylinksAdmin, walletFresh, type AdminClient, type AdminSettlement } from '@/utils/paylinksAdmin'
+import { filterOptions, networkName, orUndef, paylinksAdmin, walletFresh, type AdminClient, type AdminSettlement } from '@/utils/paylinksAdmin'
 
 const props = defineProps<{ clients: AdminClient[]; active?: boolean }>()
 const emit = defineEmits<{ changed: []; 'open-order': [id: number]; 'client-orders': [id: number] }>()
@@ -16,14 +16,15 @@ const total = ref(0)
 const sum = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
-const clientId = ref<number | undefined>(undefined)
+/** 空串 = 全部客户 */
+const clientId = ref<number | ''>('')
 const loading = ref(false)
 const paying = ref<{ clientId?: number } | null>(null)
 
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const r = await paylinksAdmin.settlements({ client_id: clientId.value, page: page.value, page_size: pageSize.value })
+    const r = await paylinksAdmin.settlements({ client_id: orUndef(clientId.value), page: page.value, page_size: pageSize.value })
     rows.value = r.settlements
     total.value = r.total
     sum.value = r.sum
@@ -41,7 +42,7 @@ const n = (v: string | number | null | undefined): number => Number(v ?? 0)
 const owed = computed(() => props.clients.filter((c) => n(c.unsettled) > 0.004))
 /** 已结金额里没有打款记录的部分（以前手动填的） */
 const settledWithoutRecord = computed(() => props.clients.reduce((s, c) => s + n(c.settled), 0) - sum.value)
-const clientOptions = computed(() => props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username })))
+const clientOptions = computed(() => filterOptions(props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username })), '全部客户'))
 const shortAddr = (s: string): string => (s.length > 16 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s)
 
 function onSaved(): void {
@@ -86,9 +87,9 @@ function onSaved(): void {
     <a-card size="small" :title="`打款记录（${total} 笔 · 合计 ${n(sum).toFixed(2)}）`">
       <template #extra>
         <a-space>
-          <a-select v-model:value="clientId" allow-clear placeholder="全部客户" :options="clientOptions" size="small" style="width: 130px" />
-          <a-button size="small" :loading="loading" @click="load"><template #icon><ReloadOutlined /></template></a-button>
-          <a-button size="small" type="primary" @click="paying = { clientId }"><template #icon><PlusOutlined /></template>记一笔打款</a-button>
+          <a-select v-model:value="clientId" :options="clientOptions" size="small" style="width: 130px" />
+          <a-tooltip title="刷新"><a-button size="small" :loading="loading" @click="load"><template #icon><ReloadOutlined /></template></a-button></a-tooltip>
+          <a-button size="small" type="primary" @click="paying = { clientId: orUndef(clientId) }"><template #icon><PlusOutlined /></template>记一笔打款</a-button>
         </a-space>
       </template>
       <a-alert

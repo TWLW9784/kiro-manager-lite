@@ -159,11 +159,36 @@ ${esc(copyTitle)}"><span>${esc(label)}</span><i aria-hidden="true">⧉</i></butt
     }
   }
 
+  /** 顶部细进度条：请求期间显示，叠加请求只显示一条 */
+  let busy = 0
+  function loading(on) {
+    busy = Math.max(0, busy + (on ? 1 : -1))
+    let bar = $('#load-bar')
+    if (!bar) {
+      bar = Object.assign(document.createElement('div'), { id: 'load-bar', className: 'load-bar' })
+      document.body.append(bar)
+    }
+    bar.classList.toggle('on', busy > 0)
+    document.querySelector('.content')?.classList.toggle('busy', busy > 0)
+  }
+
   async function guard(fn) {
+    loading(true)
     try {
       return await fn()
     } catch (e) {
       if (e.message !== 'login required') toast(e.message, 'error')
+    } finally {
+      loading(false)
+    }
+  }
+
+  /** 输入防抖：搜索框边打边筛 */
+  function debounce(fn, ms = 400) {
+    let t
+    return (...args) => {
+      clearTimeout(t)
+      t = setTimeout(() => fn(...args), ms)
     }
   }
 
@@ -196,5 +221,5 @@ ${esc(copyTitle)}"><span>${esc(label)}</span><i aria-hidden="true">⧉</i></butt
     return { go, initial: $(`.nav [data-view="${first}"]`) ? first : $('.nav [data-view]').dataset.view }
   }
 
-  return { $, $$, esc, num, usd, cny, amount, dt, day, short, linkCell, toast, copy, drawer, modal, confirm, pager, client, guard, mountNav }
+  return { $, $$, esc, num, usd, cny, amount, dt, day, short, linkCell, loading, debounce, toast, copy, drawer, modal, confirm, pager, client, guard, mountNav }
 })()

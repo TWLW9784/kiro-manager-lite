@@ -5,20 +5,39 @@ import { message } from 'ant-design-vue'
 import { FileAddOutlined, ReloadOutlined } from '@ant-design/icons-vue'
 import PaylinksOrderModal from '@/components/paylinks/PaylinksOrderModal.vue'
 import PaylinksOrderDrawer from '@/components/paylinks/PaylinksOrderDrawer.vue'
-import { ORDER_STATUS_META, SETTLE_STATUS_META, paylinksAdmin, type AdminClient, type AdminOrder } from '@/utils/paylinksAdmin'
+import {
+  ORDER_STATUS_META,
+  SETTLE_STATUS_META,
+  filterOptions,
+  metaFilterOptions,
+  orUndef,
+  paylinksAdmin,
+  type AdminClient,
+  type AdminOrder
+} from '@/utils/paylinksAdmin'
 
 const props = defineProps<{ clients: AdminClient[]; active?: boolean }>()
 const emit = defineEmits<{ changed: [] }>()
 /** 外部（客户列表 / 结算页）可以带着客户、结算状态筛选跳过来 */
-const clientId = defineModel<number | undefined>('clientId')
-const settle = defineModel<string | undefined>('settle')
+// 筛选值：空串 = 全部（a-select 的「全部」项用空串，undefined 会显示成空白）
+const clientIdModel = defineModel<number | '' | undefined>('clientId')
+const settleModel = defineModel<string | undefined>('settle')
+/** 父组件（客户页 / 结算页跳过来）可能传 undefined，这里兜成空串 */
+const clientId = computed({
+  get: () => clientIdModel.value ?? '',
+  set: (v) => (clientIdModel.value = v)
+})
+const settle = computed({
+  get: () => settleModel.value ?? '',
+  set: (v) => (settleModel.value = v)
+})
 
 const orders = ref<AdminOrder[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const loading = ref(false)
-const status = ref<string | undefined>('open')
+const status = ref<string>('open')
 const q = ref('')
 const creating = ref(false)
 const opened = ref<number | null>(null)
@@ -27,7 +46,12 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     const r = await paylinksAdmin.ordersPage({
-      status: status.value, client_id: clientId.value, settle: settle.value, q: q.value.trim() || undefined, page: page.value, page_size: pageSize.value
+      status: orUndef(status.value),
+      client_id: orUndef(clientId.value),
+      settle: orUndef(settle.value),
+      q: q.value.trim() || undefined,
+      page: page.value,
+      page_size: pageSize.value
     })
     orders.value = r.orders
     total.value = r.total
@@ -38,7 +62,14 @@ async function load(): Promise<void> {
   }
 }
 
-watch([status, clientId, settle], () => { page.value = 1; void load() })
+watch([status, clientIdModel, settleModel], () => { page.value = 1; void load() })
+/** 搜索框点 × 清空时立刻生效（a-input-search 的 × 只发 change，不发 search） */
+function onSearchChange(e: { target: { value?: string } }): void {
+  if (!e.target.value) {
+    page.value = 1
+    void load()
+  }
+}
 watch([page, pageSize], () => void load())
 watch(() => props.active, (on) => on && load(), { immediate: true })
 
@@ -60,7 +91,19 @@ const columns = [
   { title: '创建', key: 'created', width: 96 },
   { title: '', key: 'act', width: 64 }
 ]
-const clientOptions = computed(() => props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username })))
+const clientOptions = computed(() => filterOptions(props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username })), '全部客户'))
+const statusOptions = metaFilterOptions(ORDER_STATUS_META, '全部状态')
+const settleOptions = metaFilterOptions(SETTLE_STATUS_META, '全部结算状态')
+/** 有没有在筛（默认只看进行中，不算） */
+const filtered = computed(() => !!clientId.value || !!settle.value || !!q.value.trim() || status.value !== 'open')
+function reset(): void {
+  clientId.value = ''
+  settle.value = ''
+  status.value = 'open'
+  q.value = ''
+  page.value = 1
+  void load()
+}
 const customRow = (r: AdminOrder): Record<string, unknown> => ({ onClick: () => (opened.value = r.id), style: 'cursor: pointer' })
 
 function onChanged(): void {
@@ -73,13 +116,22 @@ function onChanged(): void {
   <a-card size="small" :title="`派单批次（${total}）`">
     <template #extra>
       <a-space wrap>
-        <a-input-search v-model:value="q" placeholder="批次号 / 备注" size="small" style="width: 150px" allow-clear @search="() => ((page = 1), load())" />
-        <a-select v-model:value="clientId" allow-clear placeholder="全部客户" :options="clientOptions" size="small" style="width: 120px" />
-        <a-select v-model:value="status" allow-clear placeholder="全部状态" size="small" style="width: 100px"
-          :options="Object.entries(ORDER_STATUS_META).map(([value, m]) => ({ value, label: m.text }))" />
-        <a-select v-model:value="settle" allow-clear placeholder="结算状态" size="small" style="width: 100px"
-          :options="Object.entries(SETTLE_STATUS_META).map(([value, m]) => ({ value, label: m.text }))" />
-        <a-button size="small" :loading="loading" @click="load"><template #icon><ReloadOutlined /></template></a-button>
+        <a-input-search
+          v-model:value="q"
+          placeholder="批次号 / 备注"
+          size="small"
+          style="width: 150px"
+          allow-clear
+          @search="() => ((page = 1), load())"
+          @change="onSearchChange"
+        />
+        <a-select v-model:value="clientId" :options="clientOptions" size="small" style="width: 120px" />
+        <a-select v-model:value="status" :options="statusOptions" size="small" style="width: 108px" />
+        <a-select v-model:value="settle" :options="settleOptions" size="small" style="width: 120px" />
+        <a-tooltip title="回到默认：进行中、全部客户">
+          <a-button v-if="filtered" size="small" @click="reset">重置筛选</a-button>
+        </a-tooltip>
+        <a-tooltip title="刷新"><a-button size="small" :loading="loading" @click="load"><template #icon><ReloadOutlined /></template></a-button></a-tooltip>
         <a-button size="small" type="primary" :disabled="!props.clients.length" @click="creating = true">
           <template #icon><FileAddOutlined /></template>派单
         </a-button>
@@ -129,7 +181,7 @@ function onChanged(): void {
     </a-table>
   </a-card>
   <PaylinksOrderDrawer v-if="opened" :order-id="opened" :clients="props.clients" @changed="onChanged" @close="opened = null" />
-  <PaylinksOrderModal v-if="creating" :clients="props.clients" :client-id="clientId" @saved="onChanged" @close="creating = false" />
+  <PaylinksOrderModal v-if="creating" :clients="props.clients" :client-id="orUndef(clientId)" @saved="onChanged" @close="creating = false" />
 </template>
 
 <style scoped>

@@ -18,7 +18,22 @@ const displayName = ref(props.client?.display_name ?? '')
 const password = ref(props.client ? '' : randomPassword())
 const enabled = ref(props.client ? !!props.client.enabled : true)
 const maxClaim = ref(props.client?.max_claim ?? 50)
+const TIMEOUTS = [
+  { value: 180, label: '3 小时' },
+  { value: 360, label: '6 小时' },
+  { value: 720, label: '12 小时' },
+  { value: 1440, label: '1 天' },
+  { value: 4320, label: '3 天' },
+  { value: 10080, label: '7 天' }
+]
 const timeout = ref(props.client?.claim_timeout_minutes ?? 180)
+// 老数据可能是任意分钟数，补进选项里，免得下拉显示空白
+if (!TIMEOUTS.some((t) => t.value === timeout.value)) {
+  TIMEOUTS.unshift({ value: timeout.value, label: `${timeout.value} 分钟` })
+}
+const timeoutText = computed(() =>
+  timeout.value >= 1440 ? '线下用文件发链接的客户建议 7 天，免得链接被自动换掉' : '客户领走后这么久没付，自动收回换新链接'
+)
 const note = ref(props.client?.note ?? '')
 // 收款地址：客户自己在门户里填（要输密码）；客户在群里发过来时可以代填
 // 只支持 Polygon：以前填的是别的网络时地址不带出来，要客户重填
@@ -101,8 +116,8 @@ async function save(): Promise<void> {
           <a-form-item label="单次最多领取">
             <a-input-number v-model:value="maxClaim" :min="1" :max="500" :precision="0" addon-after="条" style="width: 100%" />
           </a-form-item>
-          <a-form-item label="领走未付多久收回">
-            <a-input-number v-model:value="timeout" :min="10" :max="10080" :precision="0" addon-after="分钟" style="width: 100%" />
+          <a-form-item label="领走未付多久收回" :extra="timeoutText">
+            <a-select v-model:value="timeout" :options="TIMEOUTS" />
           </a-form-item>
         </div>
         <a-form-item label="默认每条结算单价（USD，可空）" extra="派单时没填单价就用这个；留空 = 按每条实付金额结算">

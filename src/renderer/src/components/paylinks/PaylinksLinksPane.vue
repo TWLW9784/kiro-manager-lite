@@ -15,13 +15,16 @@ import { confirmDanger } from '@/utils/ui'
 import {
   LINK_STATUS_META,
   REFRESH_REASON_TEXT,
+  filterOptions,
+  orUndef,
   paylinksAdmin,
   type AdminClient,
   type AdminLink
 } from '@/utils/paylinksAdmin'
 
 const props = defineProps<{ clients: AdminClient[]; active?: boolean }>()
-const clientId = defineModel<number | undefined>('clientId')
+/** 空串 = 全部 */
+const clientId = defineModel<number | '' | undefined>('clientId')
 const emit = defineEmits<{ changed: [AdminLink[]] }>()
 
 const accountsStore = useAccountsStore()
@@ -29,7 +32,7 @@ const settingsStore = useSettingsStore()
 const privacy = computed(() => settingsStore.settings.privacyMode)
 
 const statuses = ref<string[]>(['claimed', 'checking', 'paid'])
-const tier = ref<string | undefined>(undefined)
+const tier = ref<string>('')
 const range = ref<[string, string] | null>(null)
 const page = ref(1)
 const pageSize = ref(50)
@@ -57,9 +60,9 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     const res = await paylinksAdmin.links({
-      client_id: clientId.value,
+      client_id: orUndef(clientId.value),
       statuses: statuses.value,
-      tier: tier.value,
+      tier: orUndef(tier.value),
       from: range.value?.[0],
       to: range.value?.[1],
       page: page.value,
@@ -92,10 +95,22 @@ watch(
 )
 
 const clientOptions = computed(() =>
-  props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username }))
+  filterOptions(props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username })), '全部客户')
 )
+/** 状态是多选，没有「全部」项：清空就是全部，这里给个快捷按钮 */
 const statusOptions = Object.entries(LINK_STATUS_META).map(([value, meta]) => ({ value, label: meta.text }))
-const tierOptions = ['pro', 'pro+', 'promax', 'power'].map((v) => ({ value: v, label: v }))
+const tierOptions = filterOptions(['pro', 'pro+', 'promax', 'power'].map((v) => ({ value: v, label: v })), '全部档位')
+const DEFAULT_STATUSES = ['claimed', 'checking', 'paid']
+const filtered = computed(
+  () => !!clientId.value || !!tier.value || !!range.value || statuses.value.join() !== DEFAULT_STATUSES.join()
+)
+function reset(): void {
+  clientId.value = ''
+  tier.value = ''
+  range.value = null
+  statuses.value = [...DEFAULT_STATUSES]
+  page.value = 1
+}
 
 const columns = [
   { title: '账号', key: 'account', width: 210, ellipsis: true },
@@ -156,10 +171,19 @@ function revoke(): void {
     </template>
 
     <div class="filters">
-      <a-select v-model:value="clientId" allow-clear placeholder="全部客户" :options="clientOptions" style="width: 160px" />
-      <a-select v-model:value="statuses" mode="multiple" allow-clear placeholder="全部状态" :options="statusOptions" style="min-width: 240px; flex: 1 1 240px" />
-      <a-select v-model:value="tier" allow-clear placeholder="全部档位" :options="tierOptions" style="width: 120px" />
+      <a-select v-model:value="clientId" :options="clientOptions" style="width: 160px" />
+      <a-select
+        v-model:value="statuses"
+        mode="multiple"
+        allow-clear
+        placeholder="全部状态（不选 = 全部）"
+        :options="statusOptions"
+        :max-tag-count="3"
+        style="min-width: 240px; flex: 1 1 240px"
+      />
+      <a-select v-model:value="tier" :options="tierOptions" style="width: 120px" />
       <a-range-picker v-model:value="range" value-format="YYYY-MM-DD" :placeholder="['付款日期从', '到']" />
+      <a-button v-if="filtered" @click="reset">重置筛选</a-button>
     </div>
 
     <a-table

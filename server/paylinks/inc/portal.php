@@ -26,6 +26,13 @@ function action_me(): never
     $settled = (float) $pdo->query("SELECT COALESCE(SUM(settled_amount), 0) FROM orders WHERE client_id = $cid")->fetchColumn()
         + (float) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM settlements WHERE client_id = $cid AND order_id IS NULL")->fetchColumn();
     $open = $pdo->query("SELECT COUNT(*) FROM orders WHERE client_id = $cid AND status = 'open'")->fetchColumn();
+    // 还能领多少条：进行中、非线下批次的（目标 − 已付 − 手里待付）合计
+    $claimable = (int) $pdo->query(
+        "SELECT COALESCE(SUM(GREATEST(0, o.quantity - x.paid - x.holding)), 0) FROM orders o
+         JOIN (SELECT o2.id, COALESCE(SUM(l.status = 'paid'), 0) paid, COALESCE(SUM(l.status IN ('claimed','checking')), 0) holding
+               FROM orders o2 LEFT JOIN links l ON l.order_id = o2.id GROUP BY o2.id) x ON x.id = o.id
+         WHERE o.client_id = $cid AND o.status = 'open' AND o.source = 'site'"
+    )->fetchColumn();
     $due = client_due_map($cid)[$cid] ?? 0.0;
     json_out([
         'ok' => true,
@@ -54,6 +61,7 @@ function action_me(): never
             'settled' => round($settled, 2),
             'unsettled' => round(max(0, $due - $settled), 2),
             'open_orders' => (int) $open,
+            'claimable' => $claimable,
         ],
         'networks' => networks_public(),
         'tokens' => TOKENS,

@@ -8,7 +8,7 @@ header('Cache-Control: no-store');
 header('Referrer-Policy: same-origin');
 $authed = logged_in();
 $csrf = $authed ? csrf_token() : '';
-$v = '14';
+$v = '15';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>

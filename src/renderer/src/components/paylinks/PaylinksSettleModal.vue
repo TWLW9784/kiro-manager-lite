@@ -4,7 +4,8 @@
  * 收款地址默认带出客户在门户里填的；交易哈希和凭证（截图 / PDF）至少给一个；挂到批次上会自动累加批次的已结金额。
  */
 import { computed, onMounted, ref, watch } from 'vue'
-import { message } from 'ant-design-vue'
+import { message, type UploadFile } from 'ant-design-vue'
+import { PaperClipOutlined } from '@ant-design/icons-vue'
 import dayjs, { type Dayjs } from 'dayjs'
 import {
   NETWORKS,
@@ -46,6 +47,12 @@ const orderOptions = computed(() =>
     .map((o) => ({ value: o.id, label: `${o.code} · 应结 $${n(o.due_amount).toFixed(2)} · 已结 $${n(o.settled_amount).toFixed(2)}` }))
 )
 const addressOk = computed(() => !address.value || validAddress(network.value, address.value.trim()))
+const amountHint = computed(() => {
+  const o = props.order ?? orders.value.find((x) => x.id === orderId.value)
+  if (!o) return '不挂批次时这笔只算进客户的已结总额'
+  const left = leftOf(o)
+  return `${o.code}：应结 $${n(o.due_amount).toFixed(2)} · 已结 $${n(o.settled_amount).toFixed(2)}${left > 0.004 ? ` · 还差 $${left.toFixed(2)}` : ' · 已结清'}`
+})
 const txOk = computed(() => !txHash.value || validTxHash(network.value, txHash.value.trim()))
 
 /** 选了客户：带出他的收款地址 / 网络 / 币种，并拉他的批次 */
@@ -71,14 +78,24 @@ watch(orderId, (id) => {
 })
 onMounted(pickClient)
 
-function onFile(e: Event): void {
-  const f = (e.target as HTMLInputElement).files?.[0] ?? null
-  if (f && f.size > 5 * 1024 * 1024) {
+/** a-upload 只用来选文件，不自己上传：返回 false 阻止默认上传，文件交给 addSettlement */
+const fileList = ref<UploadFile[]>([])
+function beforeUpload(f: File): boolean {
+  if (f.size > 5 * 1024 * 1024) {
     message.error('凭证不能超过 5 MB')
-    ;(e.target as HTMLInputElement).value = ''
-    return
+    return false
+  }
+  if (!['image/jpeg', 'image/png', 'image/webp', 'application/pdf'].includes(f.type)) {
+    message.error('只支持 JPG / PNG / WEBP 图片或 PDF')
+    return false
   }
   file.value = f
+  fileList.value = [{ uid: '1', name: f.name, status: 'done' } as UploadFile]
+  return false
+}
+function dropFile(): void {
+  file.value = null
+  fileList.value = []
 }
 
 async function submit(): Promise<void> {
@@ -132,7 +149,7 @@ async function submit(): Promise<void> {
       <a-form-item v-if="!order" label="批次（可不选）" class="span-2">
         <a-select v-model:value="orderId" :options="orderOptions" allow-clear placeholder="不挂批次" />
       </a-form-item>
-      <a-form-item label="金额" required :extra="order ? `应结 $${n(order.due_amount).toFixed(2)} · 已结 $${n(order.settled_amount).toFixed(2)}` : undefined">
+      <a-form-item label="金额" required :extra="amountHint">
         <a-input-number v-model:value="amount" :min="0.01" :step="1" :precision="2" style="width: 100%" />
       </a-form-item>
       <a-form-item label="币种">
@@ -160,8 +177,20 @@ async function submit(): Promise<void> {
       <a-form-item label="交易哈希" class="span-2" :validate-status="txOk ? '' : 'error'" :help="txOk ? undefined : '交易哈希格式不对'">
         <a-input v-model:value="txHash" class="mono" placeholder="0x…（Polygon 上 66 位）" />
       </a-form-item>
-      <a-form-item label="付款凭证（截图或 PDF，5 MB 以内）" class="span-2">
-        <input type="file" accept="image/jpeg,image/png,image/webp,application/pdf" @change="onFile" />
+      <a-form-item label="付款凭证" class="span-2" extra="截图或 PDF，5 MB 以内。交易哈希和凭证至少给一个">
+        <a-upload
+          :file-list="fileList"
+          :before-upload="beforeUpload"
+          accept="image/jpeg,image/png,image/webp,application/pdf"
+          list-type="text"
+          :max-count="1"
+          @remove="dropFile"
+        >
+          <a-button v-if="!fileList.length">
+            <template #icon><PaperClipOutlined /></template>
+            选择截图 / PDF
+          </a-button>
+        </a-upload>
       </a-form-item>
       <a-form-item label="备注" class="span-2">
         <a-input v-model:value="note" :maxlength="255" placeholder="如：10-13 两个批次合并打款" />

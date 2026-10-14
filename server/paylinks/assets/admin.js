@@ -125,6 +125,7 @@ async function viewOrders() {
       <select data-of="settle" aria-label="结算状态">
         <option value="">全部结算状态</option>${Object.entries(SETTLE).map(([k, [, l]]) => `<option value="${k}" ${f.settle === k ? 'selected' : ''}>${l}</option>`).join('')}
       </select>
+      ${f.client_id || f.settle || f.q || f.status !== 'open' ? '<button class="btn sm" data-of-reset>重置筛选</button>' : ''}
     </div>
     ${r.orders.length ? `<div class="table-wrap"><table class="table stack"><thead><tr>
         <th>批次</th><th>客户</th><th>档位</th><th>进度</th><th class="right">应结</th><th>结算</th><th>状态</th><th>创建</th><th></th>

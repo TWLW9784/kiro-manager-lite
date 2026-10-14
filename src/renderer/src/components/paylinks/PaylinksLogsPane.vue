@@ -3,7 +3,7 @@
 import { ref, watch } from 'vue'
 import { message } from 'ant-design-vue'
 import { ReloadOutlined } from '@ant-design/icons-vue'
-import { paylinksAdmin, type AdminLog } from '@/utils/paylinksAdmin'
+import { filterOptions, orUndef, paylinksAdmin, type AdminLog } from '@/utils/paylinksAdmin'
 
 const props = defineProps<{ active?: boolean }>()
 
@@ -18,13 +18,14 @@ const rows = ref<AdminLog[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(30)
-const op = ref<string | undefined>(undefined)
+/** 空串 = 全部操作 */
+const op = ref<string>('')
 const loading = ref(false)
 
 async function load(): Promise<void> {
   loading.value = true
   try {
-    const r = await paylinksAdmin.logs({ filter_op: op.value, page: page.value, page_size: pageSize.value })
+    const r = await paylinksAdmin.logs({ filter_op: orUndef(op.value), page: page.value, page_size: pageSize.value })
     rows.value = r.logs
     total.value = r.total
   } catch (e) {
@@ -77,6 +78,8 @@ function fields(detail: string): { k: string; v: string }[] {
   }
 }
 
+const opOptions = filterOptions(Object.entries(OPS).map(([value, label]) => ({ value, label })), '全部操作')
+
 const columns = [
   { title: '时间', key: 'at', width: 150 },
   { title: '操作', key: 'op', width: 120 },
@@ -90,9 +93,8 @@ const columns = [
   <a-card size="small" :title="`操作日志（${total}）`">
     <template #extra>
       <a-space>
-        <a-select v-model:value="op" allow-clear placeholder="全部操作" size="small" style="width: 140px"
-          :options="Object.entries(OPS).map(([value, label]) => ({ value, label }))" />
-        <a-button size="small" :loading="loading" @click="load"><template #icon><ReloadOutlined /></template></a-button>
+        <a-select v-model:value="op" :options="opOptions" size="small" style="width: 150px" />
+        <a-tooltip title="刷新"><a-button size="small" :loading="loading" @click="load"><template #icon><ReloadOutlined /></template></a-button></a-tooltip>
       </a-space>
     </template>
     <a-table :columns="columns" :data-source="rows" :row-key="(r: AdminLog) => r.id" :loading="loading" size="small"

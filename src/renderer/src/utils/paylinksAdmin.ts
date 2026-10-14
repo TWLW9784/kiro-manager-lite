@@ -301,3 +301,22 @@ export function shortLink(url: string): string {
   if (id) return id.length > 22 ? `${id.slice(0, 14)}…${id.slice(-6)}` : id
   return url.length > 40 ? `${url.slice(0, 28)}…${url.slice(-8)}` : url
 }
+
+/**
+ * 筛选下拉的选项：第一项固定是「全部 xx」，值用空串。
+ * 用 undefined 的话 a-select 匹配不到选项、显示成空白，所以统一用 ''，发请求前再转成 undefined。
+ */
+export function filterOptions<T extends string | number>(
+  items: { value: T; label: string; disabled?: boolean }[],
+  allLabel: string
+): { value: T | ''; label: string; disabled?: boolean }[] {
+  return [{ value: '', label: allLabel }, ...items]
+}
+
+/** Record<key, {text}> → 筛选选项，带「全部 xx」 */
+export function metaFilterOptions(meta: Record<string, { text: string }>, allLabel: string): { value: string; label: string }[] {
+  return filterOptions(Object.entries(meta).map(([value, m]) => ({ value, label: m.text })), allLabel) as { value: string; label: string }[]
+}
+
+/** 筛选值 → 请求参数：空串 / 0 当成「不筛」 */
+export const orUndef = <T>(v: T | '' | undefined): T | undefined => (v === '' || v === undefined ? undefined : (v as T))
