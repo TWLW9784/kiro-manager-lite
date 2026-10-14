@@ -68,8 +68,9 @@ function clientModal(c) {
       <label class="field"><span>显示名称</span><input name="display_name" value="${esc(c?.display_name ?? '')}" maxlength="64"></label>
       <label class="field"><span>${isNew ? '密码' : '新密码（留空不改）'}</span><input name="password" value="${pw}" minlength="8" ${isNew ? 'required' : ''} autocomplete="new-password"></label>
       <label class="field"><span>状态</span><select name="enabled"><option value="1" ${!c || c.enabled ? 'selected' : ''}>启用</option><option value="0" ${c && !c.enabled ? 'selected' : ''}>停用</option></select></label>
-      <label class="field"><span>领取时限</span><select name="claim_timeout_minutes">${[[180, '3 小时'], [720, '12 小时'], [1440, '1 天'], [4320, '3 天'], [10080, '7 天（线下发出的客户）']].map(([v, l]) =>
-        `<option value="${v}" ${num(c?.claim_timeout_minutes ?? 180) === v ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+      <label class="field"><span>领取时限</span><select name="claim_timeout_minutes">${[[180, '3 小时'], [720, '12 小时'], [1440, '24 小时（推荐）'], [2880, '48 小时'], [4320, '3 天'], [10080, '7 天（太长）']].map(([v, l]) =>
+        `<option value="${v}" ${num(c?.claim_timeout_minutes ?? 1440) === v ? 'selected' : ''}>${l}</option>`).join('')}</select>
+        <span class="hint">客户在网站上领走后这么久没付，自动作废换新；线下发出的批次不受限制</span></label>
       <label class="field"><span>单次最多领取</span><input name="max_claim" type="number" min="1" max="500" value="${num(c?.max_claim ?? 50)}"></label>
       <label class="field"><span>默认每条结算单价（可空）</span><input name="unit_price" type="number" step="0.01" min="0" value="${c?.unit_price ?? ''}" placeholder="空 = 按每条实付金额"></label>
       <label class="field"><span>备注</span><input name="note" value="${esc(c?.note ?? '')}" maxlength="255"></label>

@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS clients (
   display_name    VARCHAR(64)   NOT NULL DEFAULT '',
   enabled         TINYINT(1)    NOT NULL DEFAULT 1,
   max_claim       INT UNSIGNED  NOT NULL DEFAULT 50,
-  claim_timeout_minutes INT UNSIGNED NOT NULL DEFAULT 180,
+  claim_timeout_minutes INT UNSIGNED NOT NULL DEFAULT 1440,
   -- 改密码 / 停用 / 强制下线时加一，旧会话随之失效
   session_version INT UNSIGNED  NOT NULL DEFAULT 1,
   note            VARCHAR(255)  NOT NULL DEFAULT '',

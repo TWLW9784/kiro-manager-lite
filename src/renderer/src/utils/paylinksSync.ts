@@ -294,11 +294,21 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
     const needOptimize = item.status === 'available' && isWorthOptimizing(account, item, nowMs)
     if ((!needRefresh && !needOptimize) || budget <= 0) continue
 
-    // 试过几次都换不出新链接：旧链接还能付，直接重新上架，不再浪费请求
+    /*
+     * 试过几次都换不出新链接：旧链接还能付，直接重新上架，不再浪费请求。
+     *
+     * 但「超时作废」的不能重新上架：那条链接客户已经拿到手 24 小时了，放回池子会被第二个人领到，
+     * 两个人可能都去付。这种情况下架作罢，等下一轮再试换新。
+     */
     const tries = refreshTries.get(item.url_hash) ?? 0
     if (needRefresh && tries >= MAX_REFRESH_TRIES) {
-      pendingRelist.push(item.url_hash)
-      summary.relisted++
+      if (item.refresh_reason === 'timeout') {
+        pendingSupersede.push(item.url_hash)
+        summary.dropped++
+      } else {
+        pendingRelist.push(item.url_hash)
+        summary.relisted++
+      }
       continue
     }
 

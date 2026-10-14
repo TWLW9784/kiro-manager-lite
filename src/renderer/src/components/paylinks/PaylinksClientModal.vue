@@ -22,17 +22,20 @@ const TIMEOUTS = [
   { value: 180, label: '3 小时' },
   { value: 360, label: '6 小时' },
   { value: 720, label: '12 小时' },
-  { value: 1440, label: '1 天' },
+  { value: 1440, label: '24 小时（推荐）' },
+  { value: 2880, label: '48 小时' },
   { value: 4320, label: '3 天' },
-  { value: 10080, label: '7 天' }
+  { value: 10080, label: '7 天（太长，链接容易过期）' }
 ]
-const timeout = ref(props.client?.claim_timeout_minutes ?? 180)
+const timeout = ref(props.client?.claim_timeout_minutes ?? 1440)
 // 老数据可能是任意分钟数，补进选项里，免得下拉显示空白
 if (!TIMEOUTS.some((t) => t.value === timeout.value)) {
   TIMEOUTS.unshift({ value: timeout.value, label: `${timeout.value} 分钟` })
 }
 const timeoutText = computed(() =>
-  timeout.value >= 1440 ? '线下用文件发链接的客户建议 7 天，免得链接被自动换掉' : '客户领走后这么久没付，自动收回换新链接'
+  timeout.value > 2880
+    ? '时间太长：链接放久了 Stripe 可能失效，建议 24 小时'
+    : '客户在网站上领走后这么久没付，自动作废并换一条新链接。线下用文件发出的批次不受这个限制'
 )
 const note = ref(props.client?.note ?? '')
 // 收款地址：客户自己在门户里填（要输密码）；客户在群里发过来时可以代填

@@ -220,14 +220,21 @@ function require_sync_token(): void
  * 领走超过时限还没付的放回。放回 = 标记 refresh，由桌面端换新链接再上架：
  * 旧链接可能还在工作人员手里，直接放回去会被第二个人拿到，两个人付同一条。
  */
+/**
+ * 领走超时没付的收回换新：标记 refresh，桌面端下一轮重新提取一条新链接替换它，旧链接作废。
+ * 每个客户可以单独设领取时限（默认 24 小时）。
+ *
+ * 线下（offline）批次不动：那种链接已经用 TXT / Excel 发到客户手里了，claimed_at 只是文件导出时间，
+ * 自动作废会让客户手上的文件整份失效。要收回用后台的「收回未付」。
+ */
 function release_timeouts(): int
 {
-    // 每个客户可以单独设领取时限；没归属的（老数据）用 config 里的默认值
-    $fallback = (int) (config()['claim_timeout_minutes'] ?? 180);
+    $fallback = (int) (config()['claim_timeout_minutes'] ?? 1440);
     $stmt = db()->prepare(
-        "UPDATE links l LEFT JOIN clients c ON c.id = l.client_id
+        "UPDATE links l LEFT JOIN clients c ON c.id = l.client_id LEFT JOIN orders o ON o.id = l.order_id
          SET l.status = 'refresh', l.refresh_reason = 'timeout', l.updated_at = ?
          WHERE l.status = 'claimed'
+           AND COALESCE(o.source, 'site') <> 'offline'
            AND l.claimed_at < DATE_SUB(?, INTERVAL COALESCE(c.claim_timeout_minutes, ?) MINUTE)"
     );
     $stmt->execute([now(), now(), $fallback]);

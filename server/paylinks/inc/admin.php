@@ -140,7 +140,7 @@ function admin_client_save(array $in): never
         'display_name' => mb_substr(trim((string) ($in['display_name'] ?? '')), 0, 64),
         'enabled' => !empty($in['enabled']) ? 1 : 0,
         'max_claim' => max(1, min(500, (int) ($in['max_claim'] ?? 50))),
-        'claim_timeout_minutes' => max(10, min(7 * 24 * 60, (int) ($in['claim_timeout_minutes'] ?? 180))),
+        'claim_timeout_minutes' => max(10, min(7 * 24 * 60, (int) ($in['claim_timeout_minutes'] ?? 1440))),
         'note' => mb_substr(trim((string) ($in['note'] ?? '')), 0, 255),
         'unit_price' => unit_price_or_null($in['unit_price'] ?? null),
     ];
