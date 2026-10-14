@@ -51,13 +51,14 @@ defineExpose({ open, load })
 const n = (v: string | number | null | undefined): number => Number(v ?? 0)
 const columns = [
   { title: '批次', key: 'code', width: 170 },
-  { title: '客户', key: 'client', ellipsis: true },
+  { title: '客户', key: 'client', width: 110, ellipsis: true },
   { title: '档位', key: 'tier', width: 100 },
   { title: '进度', key: 'progress', width: 200 },
   { title: '应结', key: 'due', width: 90 },
   { title: '结算', key: 'settle', width: 110 },
   { title: '状态', key: 'status', width: 80 },
-  { title: '创建', key: 'created', width: 96 }
+  { title: '创建', key: 'created', width: 96 },
+  { title: '', key: 'act', width: 64 }
 ]
 const clientOptions = computed(() => props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username })))
 const customRow = (r: AdminOrder): Record<string, unknown> => ({ onClick: () => (opened.value = r.id), style: 'cursor: pointer' })
@@ -123,6 +124,7 @@ function onChanged(): void {
           <a-badge :status="ORDER_STATUS_META[record.status as AdminOrder['status']].color as any" :text="ORDER_STATUS_META[record.status as AdminOrder['status']].text" />
         </template>
         <template v-else-if="column.key === 'created'"><span class="small">{{ record.created_at.slice(5, 16) }}</span></template>
+        <template v-else-if="column.key === 'act'"><a-button type="link" size="small">详情</a-button></template>
       </template>
     </a-table>
   </a-card>

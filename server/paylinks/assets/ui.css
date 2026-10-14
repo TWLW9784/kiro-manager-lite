@@ -320,3 +320,10 @@ table.table { width: 100%; border-collapse: collapse; }
   .table.stack td.right.nowrap { justify-content: flex-end; }
   .table.stack td.right.nowrap .btn { flex: 1 1 auto; height: 34px; }
 }
+.check { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+/* 手机上勾选格只留勾选框，不占一行标签 */
+@media (max-width: 900px) {
+  .table.stack td.c-check { position: absolute; right: 14px; margin-top: 4px; padding: 0; }
+  .table.stack td.c-check::before { display: none; }
+  .table.stack tr { position: relative; }
+}

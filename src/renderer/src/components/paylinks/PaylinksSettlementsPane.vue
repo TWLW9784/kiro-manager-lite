@@ -39,6 +39,8 @@ watch(() => props.active, (on) => on && load(), { immediate: true })
 
 const n = (v: string | number | null | undefined): number => Number(v ?? 0)
 const owed = computed(() => props.clients.filter((c) => n(c.unsettled) > 0.004))
+/** 已结金额里没有打款记录的部分（以前手动填的） */
+const settledWithoutRecord = computed(() => props.clients.reduce((s, c) => s + n(c.settled), 0) - sum.value)
 const clientOptions = computed(() => props.clients.map((c) => ({ value: c.id, label: c.display_name || c.username })))
 const shortAddr = (s: string): string => (s.length > 16 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s)
 
@@ -89,6 +91,14 @@ function onSaved(): void {
           <a-button size="small" type="primary" @click="paying = { clientId }"><template #icon><PlusOutlined /></template>记一笔打款</a-button>
         </a-space>
       </template>
+      <a-alert
+        v-if="!total && settledWithoutRecord > 0.004"
+        type="info"
+        show-icon
+        class="hint"
+        :message="`有 ${n(settledWithoutRecord).toFixed(2)} 的已结金额是在批次里手动填的，没有对应的打款记录`"
+        description="以后打完款点「记一笔打款」，附上交易哈希或截图，这里才查得到凭证。"
+      />
       <a-spin :spinning="loading">
         <PaylinksSettlementTable :rows="rows" @changed="onSaved" @open-order="(id) => emit('open-order', id)" />
       </a-spin>
@@ -104,6 +114,7 @@ function onSaved(): void {
 <style scoped>
 .pane { display: flex; flex-direction: column; gap: 16px; }
 .pager { display: flex; justify-content: flex-end; margin-top: 10px; }
+.hint { margin-bottom: 10px; }
 .mono { font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 .muted { color: var(--kal-muted); }
 .small { font-size: 12px; }

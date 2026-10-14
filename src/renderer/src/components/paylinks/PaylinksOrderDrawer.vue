@@ -100,6 +100,23 @@ function resolve(link: AdminLink, result: 'paid' | 'expired'): void {
   })
 }
 
+/** 收回这个批次里客户手里没付的链接：名额放出来，旧链接作废 */
+function revokeHolding(): void {
+  const o = order.value!
+  const ids = links.value.filter((l) => l.status === 'claimed' || l.status === 'checking').map((l) => l.id)
+  if (!ids.length) return
+  confirmDanger({
+    title: `收回 ${ids.length} 条没付的链接`,
+    content: '收回后这些链接作废，客户那边会消失，名额放回批次（可以重新领）。已付款的不受影响。',
+    okText: '收回',
+    onOk: async () => {
+      const r = await paylinksAdmin.revokeLinks(ids)
+      message.success(`已收回 ${r.revoked} 条`)
+      await reload()
+    }
+  })
+}
+
 function finish(): void {
   const o = order.value!
   confirmDanger({
@@ -189,8 +206,8 @@ async function changeQty(): Promise<void> {
               <a-form-item label="已结金额（USD）">
                 <a-input-number v-model:value="form.settled_amount" :min="0" :precision="2" style="width: 100%" />
               </a-form-item>
-              <a-form-item label="每条结算单价（留空 = 按实付）" class="span-2">
-                <a-input-number v-model:value="form.unit_price" :min="0" :max="1000" :precision="2" placeholder="如 5.00：应结 = 已付条数 × 5.00" style="width: 100%" />
+              <a-form-item label="每条结算单价" :extra="form.unit_price == null ? '留空 = 按每条实付金额' : `应结 = 已付条数 × ${usd(form.unit_price)}`">
+                <a-input-number v-model:value="form.unit_price" :min="0" :max="1000" :precision="2" placeholder="留空 = 按实付" style="width: 100%" />
               </a-form-item>
               <a-form-item label="结算备注" class="span-2">
                 <a-input v-model:value="form.settle_note" :maxlength="255" placeholder="如：按 1:1 结算，扣手续费 1 USDT" />
@@ -246,6 +263,9 @@ async function changeQty(): Promise<void> {
         <a-card v-if="order.status === 'open'" size="small" title="批次操作">
           <a-space wrap>
             <a-button @click="finish">标记完成</a-button>
+            <a-tooltip title="把客户手里还没付的链接收回：名额立刻放出来，客户可以重新领；旧链接作废，桌面端会换新上架">
+              <a-button :disabled="!n(order.holding)" @click="revokeHolding">收回未付（{{ n(order.holding) }}）</a-button>
+            </a-tooltip>
             <a-input-number v-model:value="qty" :min="1" :max="1000" :placeholder="`目标 ${order.quantity}`" style="width: 120px" />
             <a-button :disabled="!qty" @click="changeQty">改目标付款数</a-button>
             <a-button danger @click="cancel">取消批次</a-button>
@@ -260,7 +280,7 @@ async function changeQty(): Promise<void> {
 <style scoped>
 .body { display: flex; flex-direction: column; gap: 14px; }
 .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 @media (max-width: 760px) { .stats { grid-template-columns: 1fr 1fr; } .two { grid-template-columns: 1fr; } }
 .label { font-size: 12px; color: var(--kal-muted); }
 .value { font-size: 20px; font-weight: 600; line-height: 1.3; }

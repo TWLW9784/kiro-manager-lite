@@ -98,8 +98,8 @@ const statusOptions = Object.entries(LINK_STATUS_META).map(([value, meta]) => ({
 const tierOptions = ['pro', 'pro+', 'promax', 'power'].map((v) => ({ value: v, label: v }))
 
 const columns = [
-  { title: '账号', key: 'account', ellipsis: true },
-  { title: '链接', key: 'url', width: 210 },
+  { title: '账号', key: 'account', width: 210, ellipsis: true },
+  { title: '链接', key: 'url', ellipsis: true },
   { title: '档位 / 金额', key: 'tier', width: 120 },
   { title: '状态', key: 'status', width: 110 },
   { title: '客户', key: 'client', width: 110, ellipsis: true },

@@ -231,6 +231,7 @@ async function openOrder(id) {
       </div>
       ${o.status === 'open' ? `<div class="card"><div class="card-head"><h2>批次操作</h2></div><div class="card-body btn-group">
         <button class="btn" data-oa="done">标记完成</button>
+        <button class="btn" data-oa="revoke" ${num(o.holding) ? '' : 'disabled'} title="把客户手里还没付的收回：名额立刻放出来，旧链接作废">收回未付（${num(o.holding)}）</button>
         <button class="btn" data-oa="qty">改目标付款数（${o.quantity}）</button>
         ${o.source === 'offline' ? '' : `<button class="btn" data-oa="limit">改更换次数（${o.replaced}/${o.replace_limit}）</button>`}
         <button class="btn danger" data-oa="cancel">取消批次</button>
@@ -272,7 +273,15 @@ async function openOrder(id) {
       return guard(async () => { await adm('link_resolve', { id: Number(rs.dataset.id), result: rs.dataset.resolve }); toast('已定性', 'ok'); await refresh() })
     }
     const oa = e.target.closest('[data-oa]')
-    if (oa) return orderAction(oa.dataset.oa, d.o, refresh)
+    if (oa) {
+      if (oa.dataset.oa === 'revoke') {
+        const ids = d.links.filter((l) => ['claimed', 'checking'].includes(l.status)).map((l) => l.id)
+        if (!ids.length) return
+        if (!(await confirm('收回未付的链接', `收回 ${ids.length} 条？这些链接作废、客户那边消失，名额放回批次（可以重新领）。已付款的不受影响。`, { ok: '收回', cancel: '取消', danger: true }))) return
+        return guard(async () => { const r = await adm('link_revoke', { ids }); toast(`已收回 ${r.revoked} 条`, 'ok'); await refresh() })
+      }
+      return orderAction(oa.dataset.oa, d.o, refresh)
+    }
   })
 }
 

@@ -115,6 +115,16 @@ const columns = [
   { title: '', key: 'actions', width: 170 }
 ]
 const shortAddr = (s: string): string => (s.length > 16 ? `${s.slice(0, 8)}…${s.slice(-6)}` : s)
+const summaryColumns = [
+  { title: '客户', key: 'name', width: 160, ellipsis: true },
+  { title: '待付', key: 'claimed', width: 80 },
+  { title: '已付', key: 'paid', width: 110 },
+  { title: '应结', key: 'due', width: 110 },
+  { title: '已结', key: 'settled', width: 90 },
+  { title: '未结', key: 'unsettled', width: 90 },
+  { title: '收款地址', key: 'wallet', width: 180 },
+  { title: '', key: 'act', width: 90 }
+]
 const timeoutText = (m: number): string => (m % 1440 === 0 ? `${m / 1440} 天` : m % 60 === 0 ? `${m / 60} 小时` : `${m} 分钟`)
 const desktopAgo = computed(() => {
   const o = overview.value
@@ -222,6 +232,46 @@ function onLinksChanged(_links: AdminLink[]): void {
                 <div class="stat-sub muted">应结 {{ money(overview?.settle?.due, '$') }} · 未结 <b :class="unsettledTotal > 0 ? 'warn' : ''">{{ money(unsettledTotal, '$') }}</b></div>
               </a-card>
             </div>
+            <a-card size="small" title="客户结算概况">
+              <template #extra><a-button size="small" @click="tab = 'settlements'">去结算</a-button></template>
+              <a-table
+                :columns="summaryColumns"
+                :data-source="clients"
+                :row-key="(r: AdminClient) => r.id"
+                :pagination="false"
+                size="small"
+                :locale="{ emptyText: '还没有客户' }"
+              >
+                <template #bodyCell="{ column, record }">
+                  <template v-if="column.key === 'name'">
+                    <b>{{ record.display_name || record.username }}</b>
+                    <div class="muted small">{{ record.username }}</div>
+                  </template>
+                  <template v-else-if="column.key === 'claimed'">{{ n(record.claimed) }}</template>
+                  <template v-else-if="column.key === 'paid'">
+                    {{ n(record.paid) }}<span class="muted small"> 今日 {{ n(record.paid_today) }}</span>
+                  </template>
+                  <template v-else-if="column.key === 'due'">
+                    {{ money(record.due, '$') }}
+                    <div v-if="record.unit_price != null" class="muted small">每条 {{ money(record.unit_price, '$') }}</div>
+                  </template>
+                  <template v-else-if="column.key === 'settled'"><span class="ok">{{ money(record.settled, '$') }}</span></template>
+                  <template v-else-if="column.key === 'unsettled'">
+                    <b :class="n(record.unsettled) > 0 ? 'warn' : 'muted'">{{ money(record.unsettled, '$') }}</b>
+                  </template>
+                  <template v-else-if="column.key === 'wallet'">
+                    <template v-if="record.wallet_address">
+                      <span class="mono small">{{ shortAddr(record.wallet_address) }}</span>
+                      <a-tag v-if="record.wallet_network !== 'polygon'" color="red" :bordered="false">不是 Polygon</a-tag>
+                    </template>
+                    <a-tag v-else color="orange" :bordered="false">未设置</a-tag>
+                  </template>
+                  <template v-else-if="column.key === 'act'">
+                    <a-button type="link" size="small" @click="clientOrders(record.id, 'unsettled')">未结批次</a-button>
+                  </template>
+                </template>
+              </a-table>
+            </a-card>
             <a-card v-if="dailyRows.length" size="small" title="近 14 天已付款">
               <div class="daily">
                 <a-tooltip v-for="d in dailyRows" :key="d.day" :title="d.parts.join('，')">
@@ -269,9 +319,8 @@ function onLinksChanged(_links: AdminLink[]): void {
           <template #bodyCell="{ column, record }">
             <template v-if="column.key === 'name'">
               <div class="name">{{ record.display_name || record.username }}</div>
-              <div class="muted small">
-                {{ record.username }}<template v-if="record.note"> · {{ record.note }}</template>
-              </div>
+              <div class="muted small">{{ record.username }}</div>
+              <div v-if="record.note" class="muted small note">{{ record.note }}</div>
             </template>
             <template v-else-if="column.key === 'enabled'">
               <a-tag :color="record.enabled ? 'green' : 'default'" :bordered="false">
@@ -352,7 +401,7 @@ function onLinksChanged(_links: AdminLink[]): void {
 
 <style scoped>
 .pane { display: flex; flex-direction: column; gap: 16px; }
-.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(196px, 1fr)); gap: 12px; }
 .stat-card :deep(.ant-card-body) { display: flex; flex-direction: column; gap: 4px; }
 .stat-value { font-size: 24px; font-weight: 600; line-height: 1.2; }
 .stat-sub { font-size: 12px; }
@@ -363,6 +412,7 @@ function onLinksChanged(_links: AdminLink[]): void {
 }
 .daily-item b { font-size: 16px; color: #52c41a; }
 .name { font-weight: 600; }
+.note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tabs :deep(.ant-tabs-nav) { margin-bottom: 12px; }
 .tab-body { display: flex; flex-direction: column; gap: 16px; }
 .mono { font-family: ui-monospace, Consolas, monospace; }

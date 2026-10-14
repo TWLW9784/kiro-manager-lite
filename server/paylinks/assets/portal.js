@@ -90,7 +90,7 @@ async function viewWork() {
   // 领取：每个可领的批次一行，进度 + 数量 + 领取按钮
   const claimCard = claimable.length
     ? `<div class="card">
-        <div class="card-head"><h2>${esc(t('claim_title'))}</h2><span class="small text-2">${esc(t('claim_hint'))}</span></div>
+        <div class="card-head"><h2>${esc(t('claim_title'))}</h2><span class="small text-2">${esc(t('claim_hint'))} ${esc(claimRule())}</span></div>
         <div class="claim-list">${claimable.map((o) => {
           const n = Math.min(num(o.remaining), maxClaim)
           return `<div class="claim-row">
@@ -121,28 +121,26 @@ async function viewWork() {
     ${claimCard}
     <div class="card" id="pending-card">
       <div class="card-head"><h2>${esc(t('pending_title'))} <span class="badge warn plain">${r.total}</span></h2>
-        <div class="btn-group">
-          <button class="btn sm primary" data-pa="copy-all" ${r.total ? '' : 'disabled'}>${esc(t('copy_all_pending', { n: r.total }))}</button>
-          <button class="btn sm" data-pa="copy-sel">${esc(t('copy_selected'))}</button>
-          <button class="btn sm" data-pa="txt">${esc(t('export_txt'))}</button>
-          <button class="btn sm danger" data-pa="release">${esc(t('release_selected'))}</button>
-        </div>
+        <button class="btn sm primary" data-pa="copy-all" ${r.total ? '' : 'disabled'}>${esc(t('copy_all_pending', { n: r.total }))}</button>
       </div>
       <div class="toolbar">
+        <label class="check"><input type="checkbox" data-check-all ${allChecked ? 'checked' : ''}> <span class="small">${esc(t('select_all'))}</span></label>
+        <span class="muted small" id="sel-info">${esc(t('selected_n', { n: S.selected.size }))}</span>
+        <button class="btn sm" data-pa="copy-sel">${esc(t('copy_selected'))}</button>
+        <button class="btn sm" data-pa="txt">${esc(t('export_txt'))}</button>
+        <button class="btn sm danger" data-pa="release">${esc(t('release_selected'))}</button>
+        <span class="grow"></span>
         <select data-pf="order_id" aria-label="${esc(t('col_batch'))}"><option value="">${esc(t('all_orders'))}</option>
           ${open.orders.filter((o) => num(o.holding)).map((o) => `<option value="${o.id}" ${String(f.order_id) === String(o.id) ? 'selected' : ''}>${esc(o.code)}（${num(o.holding)}）</option>`).join('')}
         </select>
-        <span class="muted small" id="sel-info">${esc(t('selected_n', { n: S.selected.size }))}</span>
-        <span class="grow"></span>
-        <span class="small text-2">${esc(claimRule())}</span>
       </div>
       ${r.links.length ? `<div class="table-wrap"><table class="table stack"><thead><tr>
-          <th class="c-check"><input type="checkbox" data-check-all ${allChecked ? 'checked' : ''} aria-label="${esc(t('select_all'))}"></th>
+          <th class="c-check"></th>
           <th>${esc(t('col_link'))}</th><th>${esc(t('col_batch'))}</th><th class="right">${esc(t('col_amount'))}</th><th>${esc(t('col_left'))}</th><th></th>
         </tr></thead><tbody>${r.links.map((l) => {
           const checking = l.status === 'checking'
           return `<tr class="${S.fresh.has(String(l.id)) ? 'fresh' : ''}">
-            <td class="c-check"><input type="checkbox" data-sel="${l.id}" ${S.selected.has(String(l.id)) ? 'checked' : ''} ${checking ? 'disabled' : ''} aria-label="${esc(t('select'))}"></td>
+            <td class="c-check" data-label="">${checking ? '' : `<input type="checkbox" data-sel="${l.id}" ${S.selected.has(String(l.id)) ? 'checked' : ''} aria-label="${esc(t('select'))}">`}</td>
             <td data-label="${esc(t('col_link'))}" class="url">${linkCell(l.url, { copyTitle: t('click_copy') })}</td>
             <td data-label="${esc(t('col_batch'))}">${l.code ? `<button class="link-btn" data-order="${l.order_id}">${esc(l.code)}</button>` : '-'}<span class="small muted"> · ${esc(l.tier)}</span></td>
             <td data-label="${esc(t('col_amount'))}" class="right num">${usd(l.amount_due)}<div class="small muted">${cny(l.amount_cny)}</div></td>
