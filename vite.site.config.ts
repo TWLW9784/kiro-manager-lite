@@ -22,16 +22,20 @@ export default defineConfig({
   build: {
     outDir: resolve(__dirname, 'server/paylinks/assets/app'),
     emptyOutDir: true,
-    // PHP 页面用固定文件名引用，不要带 hash
     rollupOptions: {
       input: {
         portal: resolve(__dirname, 'site/src/portal/main.ts'),
         admin: resolve(__dirname, 'site/src/admin/main.ts')
       },
       output: {
+        // 入口和 css 用固定名：PHP 页面直接引用，并自己带 ?v= 破缓存
         entryFileNames: '[name].js',
-        chunkFileNames: 'chunk-[name].js',
         assetFileNames: '[name][extname]',
+        // 公共 chunk 必须带 hash。入口里 import './chunk-vendor.js' 是
+        // Rollup 写死的相对路径，带不上 ?v=，固定名会让浏览器把新入口和
+        // 缓存里的旧 chunk 配到一起，直接报
+        // "does not provide an export named 'xx'" 白屏。
+        chunkFileNames: 'chunk-[name]-[hash].js',
         // 公共依赖固定成 vendor，PHP 页面好引用；否则会按首个用到的组件命名
         manualChunks(id) {
           if (id.includes('node_modules')) return 'vendor'

@@ -5,10 +5,14 @@ import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { CopyDocument, Refresh } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
 import { copyText, networkName, num, validAddress } from '@site/shared/format'
+import { dialogWidth, useViewport } from '@site/shared/responsive'
 import type { AdminClient } from '../state'
 
 const props = defineProps<{ client: AdminClient | null }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
+
+const { width: vw } = useViewport()
+const boxWidth = computed(() => dialogWidth(vw.value, 620))
 
 const TIMEOUTS = [
   { value: 180, label: '3 小时' },
@@ -105,7 +109,7 @@ async function save(): Promise<void> {
   <el-dialog
     :model-value="true"
     :title="editing ? `编辑客户 · ${props.client?.username}` : '新建客户'"
-    width="620px"
+    :width="boxWidth"
     append-to-body
     @close="emit('close')"
   >

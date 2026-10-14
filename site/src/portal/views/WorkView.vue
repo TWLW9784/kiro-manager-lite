@@ -6,6 +6,7 @@ import { Refresh } from '@element-plus/icons-vue'
 import PaylinkUrl from '@site/shared/PaylinkUrl.vue'
 import { api, guard } from '@site/shared/api'
 import { copyText, cny, num, usd } from '@site/shared/format'
+import { useViewport } from '@site/shared/responsive'
 import { tt, t, lang } from '../i18n'
 import { claimRule, loadMe, me, walletIssue } from '../state'
 import OrderDrawer from '../components/OrderDrawer.vue'
@@ -53,6 +54,27 @@ const fresh = ref(new Set<number>())
 const claimCount = ref<Record<number, number>>({})
 const drawerOrder = ref<number | null>(null)
 const tableRef = ref()
+
+// 窄屏改用卡片列表：这张表完整要 834px，390px 手机上 61% 的内容
+// （包括「打开付款」按钮）在屏幕外，必须横向拖动才点得到
+const { width: vw } = useViewport()
+const compact = computed(() => vw.value <= 860)
+
+/** 卡片模式下的勾选。复用同一个 selected，工具栏那几个批量操作不用改 */
+const pickedIds = computed({
+  get: () => selected.value.map((r) => r.id),
+  set: (ids: number[]) => {
+    const keep = new Set(ids)
+    selected.value = rows.value.filter((r) => keep.has(r.id))
+  }
+})
+const selectableRows = computed(() => rows.value.filter((r) => r.status === 'claimed'))
+const allPicked = computed(
+  () => !!selectableRows.value.length && pickedIds.value.length === selectableRows.value.length
+)
+function toggleAll(v: boolean): void {
+  pickedIds.value = v ? selectableRows.value.map((r) => r.id) : []
+}
 
 const stats = computed(() => me.value?.stats)
 const claimable = computed(() => openOrders.value.filter((o) => num(o.remaining) > 0))
@@ -307,7 +329,57 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
       <el-button type="danger" plain :disabled="!picked.length" @click="release">{{ tt('release_selected') }}</el-button>
     </div>
 
+    <!-- 手机：卡片列表。一条链接一张卡，链接和按钮都在一屏内 -->
+    <div v-if="compact" v-loading="loading" class="link-cards">
+      <el-checkbox
+        v-if="selectableRows.length"
+        class="pick-all"
+        :model-value="allPicked"
+        :indeterminate="!!pickedIds.length && !allPicked"
+        @change="(v: boolean | string | number) => toggleAll(!!v)"
+      >
+        {{ tt('select_all') }}
+      </el-checkbox>
+      <el-checkbox-group v-model="pickedIds" class="card-group">
+        <article v-for="row in rows" :key="row.id" class="link-card" :class="{ 'is-fresh': fresh.has(row.id) }">
+          <div class="card-top">
+            <el-checkbox :value="row.id" :disabled="row.status !== 'claimed'" :aria-label="row.code ?? ''" />
+            <PaylinkUrl :url="row.url" :tip="tt('click_copy')" :copied="tt('copied', { n: 1 })" />
+          </div>
+          <div class="card-meta">
+            <el-link v-if="row.order_id" type="primary" :underline="false" @click="drawerOrder = row.order_id">
+              {{ row.code }}
+            </el-link>
+            <span v-else class="muted">-</span>
+            <span class="muted small">{{ row.tier }}</span>
+            <span class="num grow right">{{ usd(row.amount_due) }}</span>
+          </div>
+          <div class="card-foot">
+            <el-tag v-if="row.status === 'checking'" type="warning" size="small">{{ tt('link_checking') }}</el-tag>
+            <span v-else :class="['small', row.expires_in < 3600 ? 'warn' : 'muted']">{{ left(row.expires_in) }}</span>
+            <span class="grow"></span>
+            <el-button
+              v-if="row.status === 'claimed' && row.order_id && row.source !== 'offline'"
+              size="small"
+              text
+              @click="replace(row)"
+            >
+              {{ tt('replace') }}
+            </el-button>
+            <el-button size="small" type="primary" plain tag="a" :href="row.url" target="_blank" rel="noopener noreferrer">
+              {{ tt('open_pay') }}
+            </el-button>
+          </div>
+        </article>
+      </el-checkbox-group>
+      <el-empty
+        v-if="!rows.length && !loading"
+        :description="claimable.length ? tt('no_claimed_claim_tip') : tt('no_claimed')"
+      />
+    </div>
+
     <el-table
+      v-else
       ref="tableRef"
       v-loading="loading"
       :data="rows"
@@ -390,8 +462,31 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
 .claim-info { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
 .tier-tag { margin-left: 8px; }
 .claim-count { width: 120px; }
-.w-200 { width: 200px; }
 :deep(.fresh-row) { background: var(--el-color-success-light-9); }
+
+/* ---- 手机卡片列表 ---- */
+.link-cards { display: flex; flex-direction: column; gap: 10px; }
+.pick-all { margin: 2px 0 0; }
+.card-group { display: flex; flex-direction: column; gap: 10px; width: 100%; }
+.link-card {
+  border: 1px solid var(--el-border-color-light);
+  border-radius: var(--el-border-radius-base);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--el-bg-color);
+}
+.link-card.is-fresh { background: var(--el-color-success-light-9); border-color: var(--el-color-success-light-7); }
+.card-top { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.card-top :deep(.paylink) { flex: 1 1 auto; min-width: 0; }
+.card-meta, .card-foot { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* 手机上要点得准：size="small" 默认只有 24px 高 */
+.card-foot :deep(.el-button--small) { height: 34px; padding: 8px 12px; }
+.card-top :deep(.el-checkbox) { padding: 8px; margin: -8px; }
+/* el-checkbox-group 默认是行内排布，这里要让每张卡占满一行 */
+.card-group :deep(.el-checkbox) { margin-right: 0; height: auto; }
+
 @media (max-width: 900px) {
   .claim-row { flex-wrap: wrap; }
   .claim-info { flex-basis: 100%; }

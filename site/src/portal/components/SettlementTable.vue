@@ -2,6 +2,7 @@
 /** 打款记录表：时间 / 批次 / 金额 / 网络与地址 / 交易 / 凭证 / 备注 */
 import { computed } from 'vue'
 import { dt, num, short } from '@site/shared/format'
+import { useViewport } from '@site/shared/responsive'
 import { tt } from '../i18n'
 
 export interface Settlement {
@@ -23,6 +24,10 @@ export interface Settlement {
 const props = withDefaults(defineProps<{ rows: Settlement[]; withOrder?: boolean }>(), { withOrder: true })
 const emit = defineEmits<{ 'open-order': [id: number] }>()
 const empty = computed(() => `${tt.value('no_settlements')}｜${tt.value('no_settlements_tip')}`)
+// 手机上整表要 1000px、窗口 324px。地址和交易哈希是长串 16 进制，
+// 在手机上本来也看不全，收起来；凭证和金额这些要紧的留着
+const { width: vw } = useViewport()
+const compact = computed(() => vw.value <= 860)
 </script>
 
 <template>
@@ -44,17 +49,17 @@ const empty = computed(() => `${tt.value('no_settlements')}｜${tt.value('no_set
         <span class="muted small"> {{ row.token }}</span>
       </template>
     </el-table-column>
-    <el-table-column :label="tt('col_network')" width="110">
+    <el-table-column v-if="!compact" :label="tt('col_network')" width="110">
       <template #default="{ row }">{{ row.network_name }}</template>
     </el-table-column>
-    <el-table-column :label="tt('col_to')" width="150">
+    <el-table-column v-if="!compact" :label="tt('col_to')" width="150">
       <template #default="{ row }">
         <el-tooltip :content="row.to_address" placement="top">
           <span class="mono">{{ short(row.to_address) }}</span>
         </el-tooltip>
       </template>
     </el-table-column>
-    <el-table-column :label="tt('col_tx')" width="160">
+    <el-table-column v-if="!compact" :label="tt('col_tx')" width="160">
       <template #default="{ row }">
         <el-link
           v-if="row.tx_url"
@@ -83,7 +88,7 @@ const empty = computed(() => `${tt.value('no_settlements')}｜${tt.value('no_set
         <span v-else class="muted">-</span>
       </template>
     </el-table-column>
-    <el-table-column :label="tt('col_note')" min-width="120">
+    <el-table-column v-if="!compact" :label="tt('col_note')" min-width="120">
       <template #default="{ row }"><span class="small">{{ row.note }}</span></template>
     </el-table-column>
     <template #empty><el-empty :description="empty" /></template>

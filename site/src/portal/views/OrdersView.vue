@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /** 我的批次：按状态 / 结算状态筛，点一行看详情 */
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { Refresh } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
 import { ORDER_STATUS, SETTLE_STATUS, num, usd } from '@site/shared/format'
+import { useViewport } from '@site/shared/responsive'
 import { tt } from '../i18n'
 import OrderDrawer from '../components/OrderDrawer.vue'
 
@@ -34,6 +35,10 @@ const size = ref(10)
 const status = ref('')
 // 'all' 而不是空串：Element Plus 把空串当「没选」，会退回显示英文 placeholder
 const settle = ref('all')
+// 手机上这张表完整要 1010px，窗口只有 324px。把档位折进「批次」列、
+// 隐掉创建时间，少让客户横拖一半距离（已付金额留着——利润在那一列）
+const { width: vw } = useViewport()
+const compact = computed(() => vw.value <= 860)
 const loading = ref(false)
 const drawerOrder = ref<number | null>(null)
 
@@ -87,10 +92,12 @@ const refilter = (): void => {
         <template #default="{ row }">
           <el-link type="primary" :underline="false">{{ row.code }}</el-link>
           <el-tag v-if="row.source === 'offline'" size="small" class="src">{{ tt('source_offline') }}</el-tag>
+          <!-- 窄屏把档位 / 目标数折到这里，不另占一列 -->
+          <div v-if="compact" class="muted small">{{ row.tier }} · {{ tt('col_target') }} {{ row.quantity }}</div>
           <div v-if="row.note" class="muted small ellipsis">{{ row.note }}</div>
         </template>
       </el-table-column>
-      <el-table-column :label="tt('col_tier')" width="110">
+      <el-table-column v-if="!compact" :label="tt('col_tier')" width="110">
         <template #default="{ row }">
           {{ row.tier }}
           <div class="muted small">{{ tt('col_target') }} {{ row.quantity }}</div>
@@ -131,7 +138,7 @@ const refilter = (): void => {
           <div v-if="num(row.settled_amount)" class="muted small num">{{ usd(row.settled_amount) }}</div>
         </template>
       </el-table-column>
-      <el-table-column :label="tt('col_created')" width="110">
+      <el-table-column v-if="!compact" :label="tt('col_created')" width="110">
         <template #default="{ row }"><span class="small muted">{{ row.created_at.slice(5, 16) }}</span></template>
       </el-table-column>
       <el-table-column width="80" align="right">
@@ -159,7 +166,6 @@ const refilter = (): void => {
 </template>
 
 <style scoped>
-.w-180 { width: 180px; }
 .src { margin-left: 6px; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 :deep(.el-table__row) { cursor: pointer; }

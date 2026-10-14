@@ -193,7 +193,6 @@ watch(op, () => {
 </template>
 
 <style scoped>
-.w-170 { width: 170px; }
 .fields { display: inline-flex; flex-wrap: wrap; gap: 3px 10px; font-size: 12px; }
 .field { display: inline-flex; gap: 4px; align-items: baseline; }
 .field b { font-weight: 500; }

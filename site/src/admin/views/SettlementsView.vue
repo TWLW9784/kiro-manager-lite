@@ -137,6 +137,5 @@ async function changed(): Promise<void> {
 </template>
 
 <style scoped>
-.w-150 { width: 150px; }
 .hint { margin-bottom: 10px; }
 </style>

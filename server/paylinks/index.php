@@ -5,7 +5,7 @@ require __DIR__ . '/inc/lib.php';
 page_headers();
 $authed = logged_in();
 $csrf = $authed ? csrf_token() : '';
-$v = '24';
+$v = '35';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>

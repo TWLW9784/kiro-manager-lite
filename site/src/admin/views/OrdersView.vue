@@ -191,8 +191,6 @@ async function changed(): Promise<void> {
 </template>
 
 <style scoped>
-.w-200 { width: 200px; }
-.w-150 { width: 150px; }
 .src { margin-left: 6px; }
 .ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
 :deep(.el-table__row) { cursor: pointer; }

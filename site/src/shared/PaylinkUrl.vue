@@ -66,4 +66,11 @@ async function copy(): Promise<void> {
 .muted {
   color: var(--el-text-color-placeholder);
 }
+/* 手机 / 平板：客户最常做的动作就是点这里复制链接，
+   2px 的内边距只有 25px 高，手指点不准。断点与 layout.css 保持一致。 */
+@media (max-width: 1080px) {
+  .paylink {
+    padding: 7px 9px;
+  }
+}
 </style>

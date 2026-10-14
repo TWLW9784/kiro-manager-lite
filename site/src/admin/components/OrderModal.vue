@@ -1,12 +1,16 @@
 <script setup lang="ts">
 /** 派单：给客户开一个批次（档位 × 目标付款数），可设每条结算单价与更换次数 */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import { api, guard } from '@site/shared/api'
+import { dialogWidth, useViewport } from '@site/shared/responsive'
 import { clients } from '../state'
 
 const props = defineProps<{ clientId?: number }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
+
+const { width: vw } = useViewport()
+const boxWidth = computed(() => dialogWidth(vw.value, 560))
 
 const TIERS = ['pro', 'pro+', 'promax', 'power']
 const formRef = ref<FormInstance>()
@@ -49,7 +53,7 @@ async function submit(): Promise<void> {
 </script>
 
 <template>
-  <el-dialog :model-value="true" title="派单" width="560px" append-to-body @close="emit('close')">
+  <el-dialog :model-value="true" title="派单" :width="boxWidth" append-to-body @close="emit('close')">
     <el-form ref="formRef" :model="form" :rules="rules" label-position="top">
       <el-form-item label="客户" prop="client_id">
         <el-select v-model="form.client_id" placeholder="选择客户">

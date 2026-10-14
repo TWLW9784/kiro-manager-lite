@@ -5,12 +5,16 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import PaylinkUrl from '@site/shared/PaylinkUrl.vue'
 import { api, guard } from '@site/shared/api'
 import { LINK_STATUS, ORDER_STATUS, SETTLE_STATUS, cny, copyText, dt, num, usd } from '@site/shared/format'
+import { drawerSize, useViewport } from '@site/shared/responsive'
 import { t, tt } from '../i18n'
 import { claimRule, loadMe, me } from '../state'
 import SettlementTable from './SettlementTable.vue'
 
 const props = defineProps<{ orderId: number }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
+
+const { width: vw } = useViewport()
+const size = computed(() => drawerSize(vw.value, 760))
 
 interface OrderDetail {
   id: number
@@ -92,7 +96,7 @@ async function replace(id: number): Promise<void> {
 </script>
 
 <template>
-  <el-drawer :model-value="true" size="760px" :title="order?.code ?? ''" @close="emit('close')">
+  <el-drawer :model-value="true" :size="size" :title="order?.code ?? ''" @close="emit('close')">
     <template v-if="order" #header>
       <div class="drawer-title">
         <b>{{ order.code }}</b>

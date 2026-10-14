@@ -6,12 +6,16 @@ import { CopyDocument, Plus } from '@element-plus/icons-vue'
 import PaylinkUrl from '@site/shared/PaylinkUrl.vue'
 import { api, guard } from '@site/shared/api'
 import { LINK_STATUS, ORDER_STATUS, SETTLE_STATUS, cny, copyText, dt, networkName, num, usd, walletFresh } from '@site/shared/format'
+import { drawerSize, useViewport } from '@site/shared/responsive'
 import type { AdminOrder } from '../state'
 import SettlementTable, { type Settlement } from './SettlementTable.vue'
 import SettleModal from './SettleModal.vue'
 
 const props = defineProps<{ orderId: number }>()
 const emit = defineEmits<{ close: []; changed: []; 'goto-links': [params: Record<string, unknown>] }>()
+
+const { width: vw } = useViewport()
+const size = computed(() => drawerSize(vw.value, 860))
 
 interface Link {
   id: number
@@ -156,7 +160,7 @@ async function copyUnpaid(): Promise<void> {
 </script>
 
 <template>
-  <el-drawer :model-value="true" size="860px" @close="emit('close')">
+  <el-drawer :model-value="true" :size="size" @close="emit('close')">
     <template #header>
       <div class="drawer-title">
         <b>{{ order?.code }}</b>

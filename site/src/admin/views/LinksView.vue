@@ -231,7 +231,4 @@ async function copyPage(): Promise<void> {
 </template>
 
 <style scoped>
-.w-200 { width: 200px; }
-.w-150 { width: 150px; }
-.w-130 { width: 130px; }
 </style>

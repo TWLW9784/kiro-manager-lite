@@ -61,7 +61,10 @@ body {
 .content { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; width: 100%; }
 
 /* ---------- 统计卡 ---------- */
-.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; }
+/* 165 而不是原来的 190：侧栏出现时会吃掉 232px，内容区反而变窄，
+   190 会让 1024px 比 900px 少放两张卡（5 → 3），看着像坏了。
+   165 在 1200px（stats 实宽 905）刚好够放 5 张 —— 170 会差 1px 掉成 4 张。 */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 14px; }
 .stat-label { font-size: 12px; color: var(--el-text-color-secondary); }
 .stat-value { font-size: 24px; font-weight: 650; line-height: 1.25; font-variant-numeric: tabular-nums; }
 .stat-sub { font-size: 12px; color: var(--el-text-color-secondary); min-height: 18px; }
@@ -73,10 +76,28 @@ body {
 .card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .card-head h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+/* 筛选控件的基准宽度。统一放这里（各视图原来各自重复定义一遍 .w-200 之类），
+   选择器带上容器是为了压过 Element Plus 的 .el-select{width:100%} —— 它的样式
+   是按需注入、排在本文件之后的，同级选择器会被盖掉。
+   用 width + min-width 而不是死 width：窄屏下 .toolbar > * 是 flex:1 1 auto，
+   死宽度会和它打架。 */
+.toolbar .w-130, .card-head .w-130,
+.toolbar .w-150, .card-head .w-150,
+.toolbar .w-170, .card-head .w-170,
+.toolbar .w-180, .card-head .w-180,
+.toolbar .w-200, .card-head .w-200 { flex: 0 1 auto; }
+.toolbar .w-130, .card-head .w-130 { width: 130px; min-width: 110px; }
+.toolbar .w-150, .card-head .w-150 { width: 150px; min-width: 120px; }
+.toolbar .w-170, .card-head .w-170 { width: 170px; min-width: 130px; }
+.toolbar .w-180, .card-head .w-180 { width: 180px; min-width: 130px; }
+.toolbar .w-200, .card-head .w-200 { width: 200px; min-width: 140px; }
 .pager { display: flex; justify-content: flex-end; margin-top: 12px; }
 
-/* ---------- 手机 ---------- */
-@media (max-width: 900px) {
+/* ---------- 手机 / 平板 ----------
+   断点取 1080px（不是 900）：侧栏占 232px，1024px 的平板横屏放下侧栏后
+   内容区只剩 777px，表格列全挤在一起。这个宽度下用抽屉式侧栏更好用。
+   改这里记得同步 shared/responsive.ts 的 SIDEBAR_BREAKPOINT。 */
+@media (max-width: 1080px) {
   .shell { grid-template-columns: 1fr; }
   .sidebar {
     position: fixed; left: 0; top: 0; bottom: 0; width: 260px; height: 100vh;
@@ -89,5 +110,27 @@ body {
   .content { padding: 14px 12px 32px; gap: 12px; }
   .stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .stat-value { font-size: 20px; }
+  /* 让筛选控件铺开，但按钮按内容宽度排 —— 否则三个按钮会变成 2+1，
+     单独那个（放回所选，危险操作）被拉成整行，反而最显眼 */
   .toolbar > * { flex: 1 1 auto; }
+  .toolbar > .el-button { flex: 0 1 auto; }
+
+  /* ----- 触控目标 -----
+     表格行里的操作在手机上只有 24px 高（Element Plus 的 size="small"），
+     手指点不准，而客户最常做的恰好就是这几个：复制链接、打开付款、更换。
+     行高本来就有 72px、单元格 44px 宽，放大不会把表格撑开。
+     取 36px：44px（Apple HIG）会让每行过高，一屏能看的链接变少。 */
+  .el-table .el-button--small,
+  .card-head .el-button--small,
+  .toolbar .el-button--small,
+  .el-descriptions .el-button--small,
+  .el-alert .el-button--small { height: 36px; padding: 8px 11px; }
+  .el-table .el-link { min-height: 32px; }
+  /* 卡片标题独占一行，按钮并排在下一行。否则标题 flex:1 会把第一行占满，
+     把刷新这种图标按钮单独挤到第三行去 */
+  .card-head h2 { flex-basis: 100%; }
+  /* 支付链接那颗按钮在 PaylinkUrl.vue 自己的 scoped 样式里放大：
+     scoped 样式排在本文件之后，同级选择器在这里写了也会被盖掉 */
+  /* 复选框本体只有 14×14，把可点区域撑满单元格（负 margin 抵消占位） */
+  .el-table .el-checkbox { padding: 11px; margin: -11px; }
 }
