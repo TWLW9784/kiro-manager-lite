@@ -7,7 +7,15 @@
 //   client_kick   强制该客户重新登录
 //   links         链接明细：按客户 / 状态 / 档位 / 日期筛选，分页
 //   link_revoke   收回客户手里的链接（标记换新，旧链接作废）
+//   link_resolve  手动定性卡在确认中的链接（桌面端找不到对应账号时用）
+//   logs          管理操作日志
+// 会改数据的操作成功后都记进 admin_log
 declare(strict_types=1);
+
+/** 会改数据、要留痕的操作 */
+const ADMIN_LOGGED_OPS = [
+    'client_save', 'client_delete', 'client_kick', 'link_revoke', 'link_resolve', 'order_create', 'order_update',
+];
 
 function action_admin(): never
 {
@@ -15,7 +23,14 @@ function action_admin(): never
     require_admin();
     release_timeouts();
     $in = body();
-    match ((string) ($in['op'] ?? '')) {
+    $op = (string) ($in['op'] ?? '');
+    // 成功才记：json_out 输出 ok=true 前回调这里（失败走 fail，不记）
+    if (in_array($op, ADMIN_LOGGED_OPS, true)) {
+        $detail = $in;
+        unset($detail['op']);
+        on_json_ok(static fn (array $out) => admin_log($op, $detail + array_intersect_key($out, ['id' => 1, 'code' => 1, 'revoked' => 1, 'resolved' => 1])));
+    }
+    match ($op) {
         'overview' => admin_overview(),
         'clients' => admin_clients(),
         'client_save' => admin_client_save($in),
@@ -23,6 +38,8 @@ function action_admin(): never
         'client_kick' => admin_client_kick($in),
         'links' => admin_links($in),
         'link_revoke' => admin_link_revoke($in),
+        'link_resolve' => admin_link_resolve($in),
+        'logs' => admin_logs($in),
         'orders' => admin_orders($in),
         'order_create' => admin_order_create($in),
         'order_update' => admin_order_update($in),
@@ -45,12 +62,18 @@ function admin_overview(): never
          GROUP BY DATE(l.paid_at), l.client_id ORDER BY day DESC, n DESC"
     )->fetchAll();
     $lastCheck = $pdo->query('SELECT MAX(stripe_checked_at) FROM links')->fetchColumn();
+    // 确认中超过 30 分钟还没定性：多半是桌面端没开，或者对应账号已经不在桌面端了
+    $stuck = (int) $pdo->query(
+        "SELECT COUNT(*) FROM links WHERE status = 'checking' AND updated_at < DATE_SUB(NOW(), INTERVAL 30 MINUTE)"
+    )->fetchColumn();
     json_out([
         'ok' => true,
         'now' => now(),
         'by_status' => $byStatus,
         'daily' => $daily,
         'last_stripe_check' => $lastCheck ?: null,
+        'desktop' => meta_get('desktop_sync'),
+        'stuck_checking' => $stuck,
     ]);
 }
 
@@ -216,6 +239,44 @@ function admin_link_revoke(array $in): never
     json_out(['ok' => true, 'revoked' => $stmt->rowCount()]);
 }
 
+/**
+ * 手动定性确认中的链接。正常由桌面端查 Kiro 档位回报；桌面端里账号删了、或者确实知道结果时用。
+ * 同一个号只允许一条已付，免得重复结算。
+ */
+function admin_link_resolve(array $in): never
+{
+    $id = (int) ($in['id'] ?? 0);
+    $result = (string) ($in['result'] ?? '');
+    if (!in_array($result, ['paid', 'expired'], true)) fail('结果只能是 paid 或 expired');
+    $pdo = db();
+    $row = $pdo->prepare("SELECT account_ref, status FROM links WHERE id = ?");
+    $row->execute([$id]);
+    $link = $row->fetch();
+    if (!$link) fail('链接不存在', 404);
+    if ($link['status'] !== 'checking') fail('只能定性「确认中」的链接');
+    if ($result === 'paid') {
+        $dup = $pdo->prepare("SELECT COUNT(*) FROM links WHERE account_ref = ? AND status = 'paid'");
+        $dup->execute([$link['account_ref']]);
+        if ((int) $dup->fetchColumn() > 0) fail('这个账号已经有一条记成已付款了，不能重复记');
+    }
+    $t = now();
+    $pdo->prepare(
+        $result === 'paid'
+            ? "UPDATE links SET status = 'paid', paid_at = COALESCE(paid_at, ?), updated_at = ? WHERE id = ? AND status = 'checking'"
+            : "UPDATE links SET status = 'refresh', refresh_reason = 'expired', updated_at = ? WHERE id = ? AND status = 'checking'"
+    )->execute($result === 'paid' ? [$t, $t, $id] : [$t, $id]);
+    close_done_orders();
+    json_out(['ok' => true, 'resolved' => 1]);
+}
+
+/** 管理操作日志，最新在前 */
+function admin_logs(array $in): never
+{
+    $size = max(10, min(200, (int) ($in['page_size'] ?? 100)));
+    $stmt = db()->query("SELECT id, at, actor, ip, op, detail FROM admin_log ORDER BY id DESC LIMIT $size");
+    json_out(['ok' => true, 'logs' => $stmt->fetchAll()]);
+}
+
 // ============ 订单批次 ============
 
 /** 批次列表：可按客户 / 状态筛选，带进度 */
@@ -257,13 +318,25 @@ function admin_order_create(array $in): never
     if (!$ok->fetch()) fail('客户不存在', 404);
     $limit = isset($in['replace_limit']) ? max(0, min(1000, (int) $in['replace_limit'])) : $qty;
     $t = now();
-    // 批次号：B + 年月日 + 当天序号，按批次核对时好认
-    $seq = (int) $pdo->query("SELECT COUNT(*) FROM orders WHERE created_at >= CURDATE()")->fetchColumn() + 1;
-    $code = sprintf('B%s-%02d', date('ymd'), $seq);
-    $pdo->prepare(
+    // 批次号：B + 年月日 + 当天序号，按批次核对时好认。两人同时派单撞号时（uk_code）顺延重试
+    $prefix = 'B' . date('ymd') . '-';
+    $last = $pdo->prepare('SELECT code FROM orders WHERE code LIKE ? ORDER BY LENGTH(code) DESC, code DESC LIMIT 1');
+    $last->execute([$prefix . '%']);
+    $seq = (int) substr((string) $last->fetchColumn(), strlen($prefix)) + 1;
+    $insert = $pdo->prepare(
         "INSERT INTO orders (code, client_id, tier, quantity, replace_limit, note, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-    )->execute([$code, $clientId, $tier, $qty, $limit, mb_substr(trim((string) ($in['note'] ?? '')), 0, 255), $t, $t]);
+    );
+    $note = mb_substr(trim((string) ($in['note'] ?? '')), 0, 255);
+    for ($try = 0; ; $try++, $seq++) {
+        $code = sprintf('%s%02d', $prefix, $seq);
+        try {
+            $insert->execute([$code, $clientId, $tier, $qty, $limit, $note, $t, $t]);
+            break;
+        } catch (PDOException $e) {
+            if ($e->errorInfo[1] !== 1062 || $try >= 5) throw $e;
+        }
+    }
     json_out(['ok' => true, 'id' => (int) $pdo->lastInsertId(), 'code' => $code]);
 }
 

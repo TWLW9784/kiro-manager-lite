@@ -304,6 +304,8 @@ export interface PaylinksUpsert {
 }
 
 export interface PaylinksSyncBody {
+  /** 桌面端版本与上一轮的结果，网站后台据此显示「桌面端最后同步」 */
+  client?: { version: string; last_summary: string; last_error: string }
   upsert?: PaylinksUpsert[]
   /** 已被新链接替换的旧链接哈希，网站下架它们 */
   supersede?: string[]

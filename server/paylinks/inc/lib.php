@@ -32,8 +32,24 @@ function now(): string
     return date('Y-m-d H:i:s');
 }
 
+/** 登记一个回调：本次请求成功输出（ok=true）前执行，用于只给成功的操作留痕 */
+function on_json_ok(?callable $fn = null): ?callable
+{
+    static $hook = null;
+    if (func_num_args()) $hook = $fn;
+    return $hook;
+}
+
 function json_out(array $data, int $status = 200): never
 {
+    if (!empty($data['ok']) && ($hook = on_json_ok())) {
+        on_json_ok(null);
+        try {
+            $hook($data);
+        } catch (Throwable) {
+            // 记日志失败不影响操作本身
+        }
+    }
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
@@ -47,6 +63,8 @@ function json_out(array $data, int $status = 200): never
  */
 function fail(string $message, int $status = 400, string $code = ''): never
 {
+    // 宝塔 nginx 全局开了 fastcgi_intercept_errors，404 会被换成 HTML 错误页，错误文案就丢了
+    if ($status === 404) $status = 400;
     json_out(['ok' => false, 'error' => $message, 'code' => $code], $status);
 }
 
@@ -58,10 +76,69 @@ function body(): array
     return is_array($data) ? $data : [];
 }
 
+/** Cloudflare 回源 IP 段（https://www.cloudflare.com/ips/，2026-10 取） */
+const CLOUDFLARE_RANGES = [
+    '173.245.48.0/20', '103.21.244.0/22', '103.22.200.0/22', '103.31.4.0/22', '141.101.64.0/18',
+    '108.162.192.0/18', '190.93.240.0/20', '188.114.96.0/20', '197.234.240.0/22', '198.41.128.0/17',
+    '162.158.0.0/15', '104.16.0.0/13', '104.24.0.0/14', '172.64.0.0/13', '131.0.72.0/22',
+    '2400:cb00::/32', '2606:4700::/32', '2803:f800::/32', '2405:b500::/32', '2405:8100::/32',
+    '2a06:98c0::/29', '2c0f:f248::/32',
+];
+
+function ip_in_cidr(string $ip, string $cidr): bool
+{
+    [$net, $bits] = explode('/', $cidr);
+    $a = @inet_pton($ip);
+    $b = @inet_pton($net);
+    if ($a === false || $b === false || strlen($a) !== strlen($b)) return false;
+    $bits = (int) $bits;
+    $bytes = intdiv($bits, 8);
+    if (substr($a, 0, $bytes) !== substr($b, 0, $bytes)) return false;
+    $rest = $bits % 8;
+    if (!$rest) return true;
+    $mask = chr((0xff << (8 - $rest)) & 0xff);
+    return (($a[$bytes] & $mask) === ($b[$bytes] & $mask));
+}
+
+/**
+ * 访客真实 IP。源站也能被直连，CF-Connecting-IP 只有请求确实来自 Cloudflare 时才信，
+ * 否则谁都能伪造这个头换 IP 绕过登录限流。
+ */
 function client_ip(): string
 {
-    // 经 Cloudflare 转发，真实 IP 在 CF-Connecting-IP
-    return $_SERVER['HTTP_CF_CONNECTING_IP'] ?? $_SERVER['REMOTE_ADDR'] ?? '';
+    $remote = (string) ($_SERVER['REMOTE_ADDR'] ?? '');
+    $cf = (string) ($_SERVER['HTTP_CF_CONNECTING_IP'] ?? '');
+    if ($cf !== '' && filter_var($cf, FILTER_VALIDATE_IP)) {
+        foreach (CLOUDFLARE_RANGES as $range) {
+            if (ip_in_cidr($remote, $range)) return $cf;
+        }
+    }
+    return $remote;
+}
+
+// ============ 键值记录 / 管理日志 ============
+
+function meta_get(string $key): ?array
+{
+    $stmt = db()->prepare('SELECT v FROM meta WHERE k = ?');
+    $stmt->execute([$key]);
+    $v = $stmt->fetchColumn();
+    return $v === false ? null : (json_decode((string) $v, true) ?: null);
+}
+
+function meta_set(string $key, array $value): void
+{
+    db()->prepare('INSERT INTO meta (k, v, updated_at) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v), updated_at = VALUES(updated_at)')
+        ->execute([$key, json_encode($value, JSON_UNESCAPED_UNICODE), now()]);
+}
+
+/** 管理操作留痕：谁（网页管理员 / 桌面端）、什么时候、从哪个 IP、做了什么 */
+function admin_log(string $op, array $detail = []): void
+{
+    unset($detail['password']);
+    $actor = !empty($_SERVER['HTTP_AUTHORIZATION']) ? 'desktop' : (string) ($_SESSION['admin'] ?? 'admin');
+    db()->prepare('INSERT INTO admin_log (at, actor, ip, op, detail) VALUES (?, ?, ?, ?, ?)')
+        ->execute([now(), substr($actor, 0, 32), substr(client_ip(), 0, 64), $op, mb_substr(json_encode($detail, JSON_UNESCAPED_UNICODE), 0, 1000)]);
 }
 
 // ============ 会话（客户登录） ============

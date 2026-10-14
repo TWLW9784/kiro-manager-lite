@@ -27,6 +27,8 @@ const INTERVAL_MS = 60_000
 const FOLLOW_UP_MS = 5_000
 /** 每轮最多重新提取几条（换新 + 优化价格合计），免得一次把门户请求打满 */
 const MAX_REEXTRACT_PER_ROUND = 6
+/** 每轮最多查几个号的 Kiro 档位来确认「确认中」的链接 */
+const MAX_CONFIRM_PER_ROUND = 10
 
 export const paylinksSyncState = ref<{
   running: boolean
@@ -142,7 +144,13 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
     })
   }
 
+  const state = paylinksSyncState.value
   const body: PaylinksSyncBody = {
+    client: {
+      version: useSettingsStore().appInfo?.version ?? '',
+      last_summary: state.lastSummary.slice(0, 200),
+      last_error: state.lastError.slice(0, 200)
+    },
     upsert,
     supersede: [...supersede],
     resolve: pendingResolve,
@@ -160,12 +168,24 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
   const patches: Parameters<typeof store.patchPaymentLinks>[0] = []
   const pushed = new Set(upsert.map((u) => u.url))
   const serverByAccount = new Map<string, PaylinksServerLink>()
+  /**
+   * 网站标成「确认中」的，按账号归拢。旧链接（已换新）和本地已不算待付款的号也要确认：
+   * 客户可能付的就是旧链接，或者本地早就知道付了；不回报的话网站上会一直卡在确认中。
+   */
+  const checking = new Map<string, PaylinksServerLink[]>()
+  const paidRefs = new Set<string>()
   for (const item of res.data.links) {
     const account = byRef.get(item.account_ref)
     if (!account?.paymentLink) continue
     const link = account.paymentLink
     const current = urlHashes[link.url] === item.url_hash
     const stillPending = pending.includes(account)
+    if (item.status === 'paid') paidRefs.add(item.account_ref)
+    if (item.status === 'checking') {
+      const list = checking.get(account.id) ?? []
+      list.push(item)
+      checking.set(account.id, list)
+    }
     if (!current || !stillPending) {
       // 旧链接（已换新）或本地已不需要付款的号：还没卖出去的下架；已领走 / 已付的保持原样
       if (item.status === 'available' || item.status === 'refresh') pendingSupersede.push(item.url_hash)
@@ -208,21 +228,35 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
   }
   const refreshedEmails: string[] = []
 
+  // 确认中：本地已经是付费档的直接回报；还是 Free 的刷一次 Kiro 档位定性（按轮限额）
+  let checkBudget = MAX_CONFIRM_PER_ROUND
+  for (const [id, items] of checking) {
+    const account = store.get(id)
+    if (!account?.paymentLink) continue
+    if (!isPaidSubscription(account.subscription.type)) {
+      if (checkBudget <= 0) continue
+      checkBudget--
+      const res = await store.checkStatus(id).catch(() => ({ ok: false }))
+      if (!res.ok) continue
+    }
+    const fresh = store.get(id)
+    const paid = !!fresh && isPaidSubscription(fresh.subscription.type)
+    const ref = accountRefs[id]
+    // 一个号只付得了一次：已经有一条记成已付的，其余都算失效；否则只认一条（当前链接优先，再按领取时间最新）
+    const winner = paid && !paidRefs.has(ref) ? pickPaid(items, fresh?.paymentLink ? urlHashes[fresh.paymentLink.url] : '') : null
+    if (winner) paidRefs.add(ref)
+    for (const item of items) {
+      const result = item === winner ? 'paid' : 'expired'
+      pendingResolve.push({ url_hash: item.url_hash, result })
+      if (result === 'paid') summary.confirmedPaid++
+      else summary.confirmedExpired++
+    }
+  }
+
   for (const [id, item] of serverByAccount) {
     const account = store.get(id)
     if (!account?.paymentLink) continue
-
-    if (item.status === 'checking') {
-      // 不能再付了：刷一次 Kiro 档位定性
-      const res = await store.checkStatus(id).catch(() => ({ ok: false }))
-      if (!res.ok) continue
-      const fresh = store.get(id)
-      const paid = !!fresh && isPaidSubscription(fresh.subscription.type)
-      pendingResolve.push({ url_hash: item.url_hash, result: paid ? 'paid' : 'expired' })
-      if (paid) summary.confirmedPaid++
-      else summary.confirmedExpired++
-      continue
-    }
+    if (item.status === 'checking') continue
 
     // 换新链接 / 价格优化都要重新提取，按轮限额
     const needRefresh = item.status === 'refresh'
@@ -291,6 +325,14 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
     pendingSupersede.length > 0 ||
     pendingRelist.length > 0 ||
     summary.refreshed + summary.optimized + filled > 0
+  )
+}
+
+/** 同一个号有几条确认中、号确实付了：只记一条已付（当前链接优先，否则领取时间最新的） */
+function pickPaid(items: PaylinksServerLink[], currentHash: string): PaylinksServerLink {
+  return (
+    items.find((i) => i.url_hash === currentHash) ??
+    [...items].sort((a, b) => String(b.claimed_at ?? '').localeCompare(String(a.claimed_at ?? '')))[0]
   )
 }
 

@@ -10,6 +10,24 @@
 --   superseded 已被新链接替换，只留作记录
 -- 邮箱、凭证都不上服务器：account_ref 是桌面端账号 id 的哈希，只有桌面端能对回去。
 
+CREATE TABLE IF NOT EXISTS clients (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  username        VARCHAR(64)   NOT NULL,
+  password_hash   VARCHAR(255)  NOT NULL,
+  display_name    VARCHAR(64)   NOT NULL DEFAULT '',
+  enabled         TINYINT(1)    NOT NULL DEFAULT 1,
+  max_claim       INT UNSIGNED  NOT NULL DEFAULT 50,
+  claim_timeout_minutes INT UNSIGNED NOT NULL DEFAULT 180,
+  -- 改密码 / 停用 / 强制下线时加一，旧会话随之失效
+  session_version INT UNSIGNED  NOT NULL DEFAULT 1,
+  note            VARCHAR(255)  NOT NULL DEFAULT '',
+  last_login_at   DATETIME      NULL,
+  last_action_at  DATETIME(3)   NULL,
+  created_at      DATETIME      NOT NULL,
+  updated_at      DATETIME      NOT NULL,
+  UNIQUE KEY uk_username (username)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE IF NOT EXISTS links (
   id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   url_hash        CHAR(64)      NOT NULL,
@@ -20,6 +38,8 @@ CREATE TABLE IF NOT EXISTS links (
   amount_cny      DECIMAL(10,2) NULL,
   list_price      DECIMAL(10,2) NULL,
   status          VARCHAR(16)   NOT NULL DEFAULT 'available',
+  client_id       INT UNSIGNED  NULL,
+  order_id        INT UNSIGNED  NULL,
   claimed_at      DATETIME      NULL,
   claim_batch     VARCHAR(32)   NULL,
   paid_at         DATETIME      NULL,
@@ -32,13 +52,51 @@ CREATE TABLE IF NOT EXISTS links (
   UNIQUE KEY uk_url_hash (url_hash),
   KEY idx_status (status, tier),
   KEY idx_account (account_ref),
-  KEY idx_paid (paid_at)
+  KEY idx_paid (paid_at),
+  KEY idx_client (client_id, status),
+  KEY idx_order (order_id, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- 登录失败记录：同一 IP 15 分钟内失败 8 次就暂时拒绝
+-- 派单批次：给某个客户开「档位 × 数量」，客户在批次里领取、更换
+CREATE TABLE IF NOT EXISTS orders (
+  id              INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  code            VARCHAR(32)   NOT NULL,
+  client_id       INT UNSIGNED  NOT NULL,
+  tier            VARCHAR(16)   NOT NULL,
+  quantity        INT UNSIGNED  NOT NULL,
+  replace_limit   INT UNSIGNED  NOT NULL DEFAULT 0,
+  replaced        INT UNSIGNED  NOT NULL DEFAULT 0,
+  status          VARCHAR(16)   NOT NULL DEFAULT 'open',
+  note            VARCHAR(255)  NOT NULL DEFAULT '',
+  created_at      DATETIME      NOT NULL,
+  done_at         DATETIME      NULL,
+  updated_at      DATETIME      NOT NULL,
+  UNIQUE KEY uk_code (code),
+  KEY idx_client_status (client_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 登录失败记录：同一 IP 15 分钟内失败太多次就暂时拒绝（客户登录 8 次，管理员登录 5 次，计数共用）
 CREATE TABLE IF NOT EXISTS login_attempts (
   id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
   ip         VARCHAR(64) NOT NULL,
   at         DATETIME    NOT NULL,
   KEY idx_ip_at (ip, at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 杂项键值：desktop_sync = 桌面端最后一次同步的时间、版本、结果
+CREATE TABLE IF NOT EXISTS meta (
+  k          VARCHAR(64) NOT NULL PRIMARY KEY,
+  v          TEXT        NOT NULL,
+  updated_at DATETIME    NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 管理操作日志：网页后台与桌面端的改动都记（不含密码）
+CREATE TABLE IF NOT EXISTS admin_log (
+  id         INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  at         DATETIME     NOT NULL,
+  actor      VARCHAR(32)  NOT NULL,
+  ip         VARCHAR(64)  NOT NULL,
+  op         VARCHAR(32)  NOT NULL,
+  detail     TEXT         NOT NULL,
+  KEY idx_at (at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

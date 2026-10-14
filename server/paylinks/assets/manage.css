@@ -32,3 +32,9 @@ select, .form input {
 .item .mono { color: var(--muted); }
 .item-head input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); }
 .btn:disabled { opacity: 0.4; cursor: default; }
+.card.alert { border-color: rgba(239, 68, 68, 0.5); background: linear-gradient(rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.08)), var(--card); }
+.card.alert > b { color: #f87171; }
+.card > b + .small, .card > .small { display: block; margin-top: 4px; }
+table.mini { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.mini th, table.mini td { border-bottom: 1px solid var(--border); padding: 6px 8px; text-align: center; white-space: nowrap; }
+table.mini th:first-child, table.mini td:first-child { text-align: left; }

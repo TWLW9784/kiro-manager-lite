@@ -19,6 +19,14 @@ function action_sync(): never
     $pdo = db();
     $t = now();
     $stats = ['inserted' => 0, 'superseded' => 0, 'resolved' => 0, 'relisted' => 0];
+    // 桌面端心跳：后台总览据此判断桌面端是不是还开着
+    $client = (array) ($in['client'] ?? []);
+    meta_set('desktop_sync', [
+        'at' => $t,
+        'version' => mb_substr((string) ($client['version'] ?? ''), 0, 32),
+        'last_summary' => mb_substr((string) ($client['last_summary'] ?? ''), 0, 200),
+        'last_error' => mb_substr((string) ($client['last_error'] ?? ''), 0, 200),
+    ]);
 
     $insert = $pdo->prepare(
         "INSERT IGNORE INTO links (url_hash, url, account_ref, tier, amount_due, amount_cny, list_price,

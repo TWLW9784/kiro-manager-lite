@@ -61,9 +61,31 @@ loaders.overview = async () => {
     s.n += num(r.n); s.usd += num(r.usd); s.cny += num(r.cny)
   }
   const days = {}
-  for (const d of o.daily) days[d.day] = (days[d.day] || 0) + num(d.n)
+  const perClient = {}
+  for (const d of o.daily) {
+    days[d.day] = (days[d.day] || 0) + num(d.n)
+    const c = (perClient[d.client || '-'] ??= { n: 0, usd: 0, cny: 0, byDay: {} })
+    c.n += num(d.n); c.usd += num(d.usd); c.cny += num(d.cny); c.byDay[d.day] = num(d.n)
+  }
   const today = (o.now || '').slice(0, 10)
-  $('tab-overview').innerHTML = `
+  // 桌面端心跳：超过 10 分钟没同步就标红（补货、换新、确认付款都靠它）
+  const ds = o.desktop
+  const ago = ds ? Math.round((Date.parse(o.now.replace(' ', 'T')) - Date.parse(ds.at.replace(' ', 'T'))) / 60000) : null
+  const alive = ago !== null && ago <= 10
+  const desktopCard = `<div class="card ${alive ? '' : 'alert'}">
+    <b>${alive ? '桌面端在线' : '桌面端离线'}</b>
+    <span class="small muted">${ds ? `最后同步 ${short(ds.at)}（${ago} 分钟前）${ds.version ? ` · v${esc(ds.version)}` : ''}` : '还没有收到过桌面端同步（旧版本不上报）'}</span>
+    ${ds?.last_error ? `<div class="small error">上一轮出错：${esc(ds.last_error)}</div>` : ''}
+    ${ds?.last_summary ? `<div class="small muted">上一轮：${esc(ds.last_summary)}</div>` : ''}
+    ${alive ? '' : '<div class="small">桌面端没开时：池子不会补货，超时放回的不会换新，确认中的不会定性。</div>'}
+  </div>`
+  const stuck = num(o.stuck_checking)
+    ? `<div class="card alert"><b>${o.stuck_checking} 条确认中超过 30 分钟</b>
+        <span class="small">桌面端开着还卡住的话，可能对应账号已不在桌面端。到「链接」页筛选「确认中」手动定性。</span>
+        <button class="btn small-btn" data-goto-checking>去处理</button></div>`
+    : ''
+  const dayKeys = Object.keys(days).sort().reverse()
+  $('tab-overview').innerHTML = `${desktopCard}${stuck}
     <div class="grid4">${Object.entries(STATUS).map(([k, label]) => `
       <div class="card stat ${k === 'paid' ? 'ok' : k === 'claimed' ? 'warn' : ''}">
         <b>${tot[k]?.n ?? 0}</b><span>${label}</span>
@@ -73,10 +95,19 @@ loaders.overview = async () => {
         <span class="small muted">Stripe 检查 ${o.last_stripe_check ? o.last_stripe_check.slice(11) : '-'}</span></div>
     </div>
     <div class="card"><h2>近 14 天已付款</h2>
-      <div class="daily">${Object.entries(days).map(([d, n]) => `<span>${d.slice(5)}：${n}</span>`).join('') || '<span class="muted">暂无</span>'}</div>
+      ${dayKeys.length ? `<div class="table-wrap"><table class="mini">
+        <thead><tr><th>客户</th><th>合计</th>${dayKeys.map((d) => `<th>${d.slice(5)}</th>`).join('')}</tr></thead>
+        <tbody>${Object.entries(perClient).map(([name, c]) => `<tr><td>${esc(name)}</td>
+          <td><b class="ok">${c.n}</b><div class="small muted">${money(c.usd, '$')} · ${money(c.cny, '¥')}</div></td>
+          ${dayKeys.map((d) => `<td>${c.byDay[d] ?? ''}</td>`).join('')}</tr>`).join('')}
+          <tr><td>全部</td><td><b>${Object.values(perClient).reduce((s, c) => s + c.n, 0)}</b></td>${dayKeys.map((d) => `<td><b>${days[d]}</b></td>`).join('')}</tr>
+        </tbody></table></div>` : '<span class="muted">暂无</span>'}
     </div>
     <p class="muted small">池子不够时，开着的桌面端会按派单缺口自动提取；桌面端关着时只能领现有的。</p>`
 }
+$('tab-overview').addEventListener('click', (e) => {
+  if (e.target.closest('[data-goto-checking]')) openLinks({ statuses: ['checking'] })
+})
 // ============ 派单 ============
 let clientsCache = []
 async function loadClients() {
@@ -111,7 +142,8 @@ loaders.orders = async () => {
           · ${money(o.paid_usd, '$')} · ${money(o.paid_cny, '¥')}${o.note ? ` · ${esc(o.note)}` : ''}</div>
         <div class="row-actions">
           <button class="btn small-btn" data-links="${o.id}">查看链接</button>
-          ${o.status === 'open' ? `<button class="btn small-btn" data-limit="${o.id}" data-cur="${o.replace_limit}">改更换次数</button>
+          ${o.status === 'open' ? `<button class="btn small-btn" data-qty="${o.id}" data-cur="${o.quantity}" data-min="${num(o.paid) + num(o.holding)}">改数量</button>
+          <button class="btn small-btn" data-limit="${o.id}" data-cur="${o.replace_limit}">改更换次数</button>
           <button class="btn small-btn danger" data-cancel="${o.id}" data-code="${esc(o.code)}">取消批次</button>` : ''}
         </div></div>`
     }).join('') || '<p class="muted">还没有批次</p>'}</div>`
@@ -133,6 +165,12 @@ $('tab-orders').addEventListener('click', (e) => {
   const b = e.target.closest('button')
   if (!b) return
   if (b.dataset.links) return openLinks({ order_id: Number(b.dataset.links) })
+  if (b.dataset.qty) {
+    const v = prompt(`批次数量（已付 + 待付 ${b.dataset.min} 条，不能少于这个数）`, b.dataset.cur)
+    if (v === null) return
+    if (!(Number(v) >= Math.max(1, num(b.dataset.min)))) return toast(`数量不能少于 ${Math.max(1, num(b.dataset.min))}`)
+    return guard(async () => { await adm('order_update', { id: Number(b.dataset.qty), quantity: Number(v) }); toast('已修改'); await loaders.orders() })
+  }
   if (b.dataset.limit) {
     const v = prompt('可更换次数', b.dataset.cur)
     if (v === null) return
@@ -259,7 +297,9 @@ loaders.links = async () => {
       </div>
       <div class="mono">${esc(l.url)}</div>
       <div class="small muted">${esc(l.account_ref || '')}${l.refresh_reason ? ` · 换新原因：${REASON[l.refresh_reason] ?? esc(l.refresh_reason)}` : ''}${l.stripe_status ? ` · Stripe ${esc(l.stripe_status)} ${short(l.stripe_checked_at)}` : ''}</div>
-      <div class="row-actions"><button class="btn small-btn" data-copy="${esc(l.url)}">复制</button></div>
+      <div class="row-actions"><button class="btn small-btn" data-copy="${esc(l.url)}">复制</button>
+        ${l.status === 'checking' ? `<button class="btn small-btn" data-resolve="paid" data-id="${l.id}">确认已付</button>
+        <button class="btn small-btn danger" data-resolve="expired" data-id="${l.id}">确认失效</button>` : ''}</div>
     </div>`).join('') || '<p class="muted">没有符合条件的链接</p>'}</div>
     <div class="item-head small">
       <button class="btn small-btn" data-page="${linkFilter.page - 1}" ${linkFilter.page <= 1 ? 'disabled' : ''}>上一页</button>
@@ -298,6 +338,14 @@ $('tab-links').addEventListener('click', (e) => {
   if (b.dataset.copy) return copy(b.dataset.copy)
   if (b.hasAttribute('data-copy-all')) return $('tab-links').dataset.urls ? copy($('tab-links').dataset.urls) : toast('本页没有链接')
   if (b.dataset.page) { linkFilter.page = Number(b.dataset.page); return guard(loaders.links) }
+  if (b.dataset.resolve) {
+    const paid = b.dataset.resolve === 'paid'
+    const tip = paid
+      ? '记成已付款？会计入客户结算。请先在 Kiro / Stripe 确认这个号真的付了。'
+      : '记成失效？这条会进入待换新，桌面端换一条新链接再上架。'
+    if (!confirm(tip)) return
+    return guard(async () => { await adm('link_resolve', { id: Number(b.dataset.id), result: b.dataset.resolve }); toast('已定性'); await loaders.links() })
+  }
   if (b.hasAttribute('data-clear-order')) { delete linkFilter.order_id; linkFilter.page = 1; return guard(loaders.links) }
   if (b.hasAttribute('data-revoke-sel')) {
     const ids = [...document.querySelectorAll('#tab-links .sel:checked')].map((c) => Number(c.value))
@@ -306,5 +354,18 @@ $('tab-links').addEventListener('click', (e) => {
     guard(async () => { const r = await adm('link_revoke', { ids }); toast(`已收回 ${r.revoked} 条`); await loaders.links() })
   }
 })
+
+// ============ 日志 ============
+const OPS = {
+  client_save: '保存客户', client_delete: '删除客户', client_kick: '强制下线', link_revoke: '收回链接',
+  link_resolve: '手动定性', order_create: '派单', order_update: '修改批次'
+}
+loaders.logs = async () => {
+  const { logs } = await adm('logs', { page_size: 200 })
+  $('tab-logs').innerHTML = `<div class="list">${logs.map((l) => `<div class="item">
+    <div class="item-head"><b>${OPS[l.op] ?? esc(l.op)}</b><span class="pill">${l.actor === 'desktop' ? '桌面端' : esc(l.actor)}</span>
+      <span class="spacer"></span><span class="small muted">${esc(l.at)} · ${esc(l.ip)}</span></div>
+    <div class="mono">${esc(l.detail)}</div></div>`).join('') || '<p class="muted">还没有操作记录</p>'}</div>`
+}
 
 guard(loaders.overview)

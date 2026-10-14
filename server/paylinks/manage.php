@@ -7,7 +7,7 @@ header('X-Frame-Options: DENY');
 header('Cache-Control: no-store');
 $authed = admin_session_ok();
 $csrf = $authed ? ($_SESSION['admin_csrf'] ?? '') : '';
-$v = '2';
+$v = '3';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>
@@ -51,6 +51,7 @@ document.getElementById('login').addEventListener('submit', async (e) => {
       <button class="tab" data-tab="orders">派单</button>
       <button class="tab" data-tab="clients">客户</button>
       <button class="tab" data-tab="links">链接</button>
+      <button class="tab" data-tab="logs">日志</button>
     </nav>
     <button id="logout" class="btn ghost">退出</button>
   </header>
@@ -58,6 +59,7 @@ document.getElementById('login').addEventListener('submit', async (e) => {
   <section id="tab-orders" class="panel" hidden></section>
   <section id="tab-clients" class="panel" hidden></section>
   <section id="tab-links" class="panel" hidden></section>
+  <section id="tab-logs" class="panel" hidden></section>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </main>
 <script src="assets/manage.js?v=<?= $v ?>"></script>
