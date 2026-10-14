@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS clients (
   -- 改密码 / 停用 / 强制下线时加一，旧会话随之失效
   session_version INT UNSIGNED  NOT NULL DEFAULT 1,
   note            VARCHAR(255)  NOT NULL DEFAULT '',
+  -- 收款地址：客户在门户里填（改要输密码）；默认 Polygon 上的 USDT
+  wallet_network  VARCHAR(16)   NOT NULL DEFAULT 'polygon',
+  wallet_token    VARCHAR(16)   NOT NULL DEFAULT 'USDT',
+  wallet_address  VARCHAR(64)   NOT NULL DEFAULT '',
+  wallet_updated_at DATETIME    NULL,
   last_login_at   DATETIME      NULL,
   last_action_at  DATETIME(3)   NULL,
   created_at      DATETIME      NOT NULL,
@@ -69,6 +74,11 @@ CREATE TABLE IF NOT EXISTS orders (
   status          VARCHAR(16)   NOT NULL DEFAULT 'open',
   -- site 网站派单（客户在网站上领）；offline 线下（TXT / Excel）发出后补建，链接早已在客户手里，不从池子领
   source          VARCHAR(16)   NOT NULL DEFAULT 'site',
+  -- 结算：unsettled / partial / settled；已结金额（USD）。记打款时自动累加，管理员可手动改
+  settle_status   VARCHAR(16)   NOT NULL DEFAULT 'unsettled',
+  settled_amount  DECIMAL(12,2) NOT NULL DEFAULT 0,
+  settled_at      DATETIME      NULL,
+  settle_note     VARCHAR(255)  NOT NULL DEFAULT '',
   note            VARCHAR(255)  NOT NULL DEFAULT '',
   created_at      DATETIME      NOT NULL,
   done_at         DATETIME      NULL,
@@ -101,4 +111,24 @@ CREATE TABLE IF NOT EXISTS admin_log (
   op         VARCHAR(32)  NOT NULL,
   detail     TEXT         NOT NULL,
   KEY idx_at (at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 结算记录：给客户打的每一笔款（虚拟币）。to_address 是打款时收款地址的快照；凭证文件在 inc/proofs/
+CREATE TABLE IF NOT EXISTS settlements (
+  id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  client_id   INT UNSIGNED  NOT NULL,
+  order_id    INT UNSIGNED  NULL,
+  amount      DECIMAL(12,2) NOT NULL,
+  token       VARCHAR(16)   NOT NULL DEFAULT 'USDT',
+  network     VARCHAR(16)   NOT NULL DEFAULT 'polygon',
+  to_address  VARCHAR(64)   NOT NULL DEFAULT '',
+  tx_hash     VARCHAR(100)  NOT NULL DEFAULT '',
+  proof_file  VARCHAR(80)   NOT NULL DEFAULT '',
+  proof_mime  VARCHAR(40)   NOT NULL DEFAULT '',
+  note        VARCHAR(255)  NOT NULL DEFAULT '',
+  created_by  VARCHAR(32)   NOT NULL DEFAULT '',
+  paid_at     DATETIME      NOT NULL,
+  created_at  DATETIME      NOT NULL,
+  KEY idx_client (client_id, paid_at),
+  KEY idx_order (order_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

@@ -16,7 +16,7 @@ declare(strict_types=1);
 /** 会改数据、要留痕的操作 */
 const ADMIN_LOGGED_OPS = [
     'client_save', 'client_delete', 'client_kick', 'link_revoke', 'link_resolve', 'order_create', 'order_update',
-    'assign_links',
+    'assign_links', 'order_settle', 'settlement_delete',
 ];
 
 function action_admin(): never
@@ -45,6 +45,9 @@ function action_admin(): never
         'link_resolve' => admin_link_resolve($in),
         'logs' => admin_logs($in),
         'assign_links' => admin_assign_links($in),
+        'order_settle' => admin_order_settle($in),
+        'settlements' => admin_settlements($in),
+        'settlement_delete' => admin_settlement_delete($in),
         'orders' => admin_orders($in),
         'order_create' => admin_order_create($in),
         'order_update' => admin_order_update($in),
@@ -79,6 +82,14 @@ function admin_overview(): never
         'last_stripe_check' => $lastCheck ?: null,
         'desktop' => meta_get('desktop_sync'),
         'stuck_checking' => $stuck,
+        'settle' => [
+            'due' => round((float) $pdo->query("SELECT COALESCE(SUM(amount_due), 0) FROM links WHERE status = 'paid' AND client_id IS NOT NULL")->fetchColumn(), 2),
+            'settled' => round((float) $pdo->query("SELECT COALESCE(SUM(settled_amount), 0) FROM orders")->fetchColumn()
+                + (float) $pdo->query("SELECT COALESCE(SUM(amount), 0) FROM settlements WHERE order_id IS NULL")->fetchColumn(), 2),
+            'unsettled_orders' => (int) $pdo->query("SELECT COUNT(*) FROM orders o WHERE o.settle_status <> 'settled'
+                AND EXISTS (SELECT 1 FROM links l WHERE l.order_id = o.id AND l.status = 'paid')")->fetchColumn(),
+            'open_orders' => (int) $pdo->query("SELECT COUNT(*) FROM orders WHERE status = 'open'")->fetchColumn(),
+        ],
     ]);
 }
 
@@ -86,7 +97,7 @@ function admin_clients(): never
 {
     $rows = db()->query(
         "SELECT c.id, c.username, c.display_name, c.enabled, c.max_claim, c.claim_timeout_minutes,
-                c.note, c.last_login_at, c.created_at,
+                c.note, c.last_login_at, c.created_at, c.wallet_network, c.wallet_token, c.wallet_address, c.wallet_updated_at,
                 SUM(l.status IN ('claimed', 'checking')) AS claimed,
                 SUM(l.status = 'paid') AS paid,
                 SUM(l.status = 'paid' AND l.paid_at >= CURDATE()) AS paid_today,
@@ -96,6 +107,19 @@ function admin_clients(): never
          FROM clients c LEFT JOIN links l ON l.client_id = c.id
          GROUP BY c.id ORDER BY c.id"
     )->fetchAll();
+    // 已结 = 批次上的已结金额 + 没挂批次的结算记录（与客户门户口径一致）
+    $settled = [];
+    foreach (db()->query(
+        "SELECT client_id, SUM(v) AS v FROM (
+           SELECT client_id, settled_amount AS v FROM orders
+           UNION ALL SELECT client_id, amount FROM settlements WHERE order_id IS NULL
+         ) x GROUP BY client_id"
+    ) as $r) $settled[$r['client_id']] = round((float) $r['v'], 2);
+    foreach ($rows as &$r) {
+        $r['settled'] = $settled[$r['id']] ?? 0;
+        $r['unsettled'] = round(max(0, (float) $r['paid_usd'] - $r['settled']), 2);
+    }
+    unset($r);
     json_out(['ok' => true, 'clients' => $rows]);
 }
 
@@ -117,6 +141,19 @@ function admin_client_save(array $in): never
         'claim_timeout_minutes' => max(10, min(7 * 24 * 60, (int) ($in['claim_timeout_minutes'] ?? 180))),
         'note' => mb_substr(trim((string) ($in['note'] ?? '')), 0, 255),
     ];
+    // 收款地址：传了才改（不传保持原样）；格式按网络校验
+    if (array_key_exists('wallet_address', $in)) {
+        $network = network_or_default((string) ($in['wallet_network'] ?? 'polygon'));
+        $token = in_array($in['wallet_token'] ?? '', TOKENS, true) ? $in['wallet_token'] : 'USDT';
+        $address = trim((string) $in['wallet_address']);
+        if ($address !== '' && !valid_address($network, $address)) fail('收款地址和网络对不上');
+        $old = $pdo->prepare('SELECT wallet_network, wallet_token, wallet_address FROM clients WHERE id = ?');
+        $old->execute([$id]);
+        $prev = $old->fetch() ?: [];
+        if (($prev['wallet_address'] ?? null) !== $address || ($prev['wallet_network'] ?? null) !== $network || ($prev['wallet_token'] ?? null) !== $token) {
+            $fields += ['wallet_network' => $network, 'wallet_token' => $token, 'wallet_address' => $address, 'wallet_updated_at' => now()];
+        }
+    }
     $dup = $pdo->prepare('SELECT id FROM clients WHERE username = ? AND id <> ?');
     $dup->execute([$username, $id]);
     if ($dup->fetch()) fail('这个账号名已经有人用了');
@@ -178,7 +215,8 @@ function admin_client_kick(array $in): never
 function admin_links(array $in): never
 {
     // 按批次看时连作废的（换过新链接的旧链接）一起列，批次里每一条都能对上
-    $where = !empty($in['order_id']) && !empty($in['include_void']) ? ['1 = 1'] : ["l.status <> 'superseded'"];
+    $where = !empty($in['include_void']) || in_array('superseded', (array) ($in['statuses'] ?? []), true)
+        ? ['1 = 1'] : ["l.status <> 'superseded'"];
     $args = [];
     if (!empty($in['client_id'])) {
         $where[] = 'l.client_id = ?';
@@ -278,9 +316,20 @@ function admin_link_resolve(array $in): never
 /** 管理操作日志，最新在前 */
 function admin_logs(array $in): never
 {
-    $size = max(10, min(200, (int) ($in['page_size'] ?? 100)));
-    $stmt = db()->query("SELECT id, at, actor, ip, op, detail FROM admin_log ORDER BY id DESC LIMIT $size");
-    json_out(['ok' => true, 'logs' => $stmt->fetchAll()]);
+    [$page, $size, $offset] = page_args($in, 30, 200);
+    $where = '1 = 1';
+    $args = [];
+    // 筛选字段不能叫 op（op 是接口分发用的）
+    if (!empty($in['filter_op'])) {
+        $where = 'op = ?';
+        $args[] = (string) $in['filter_op'];
+    }
+    $pdo = db();
+    $total = $pdo->prepare("SELECT COUNT(*) FROM admin_log WHERE $where");
+    $total->execute($args);
+    $stmt = $pdo->prepare("SELECT id, at, actor, ip, op, detail FROM admin_log WHERE $where ORDER BY id DESC LIMIT $size OFFSET $offset");
+    $stmt->execute($args);
+    json_out(['ok' => true, 'total' => (int) $total->fetchColumn(), 'page' => $page, 'page_size' => $size, 'logs' => $stmt->fetchAll()]);
 }
 
 // ============ 订单批次 ============
@@ -298,17 +347,38 @@ function admin_orders(array $in): never
         $where[] = 'o.status = ?';
         $args[] = $in['status'];
     }
+    if (!empty($in['id'])) {
+        $where[] = 'o.id = ?';
+        $args[] = (int) $in['id'];
+    }
+    if (in_array($in['settle'] ?? '', ['unsettled', 'partial', 'settled'], true)) {
+        $where[] = 'o.settle_status = ?';
+        $args[] = $in['settle'];
+    }
+    $q = trim((string) ($in['q'] ?? ''));
+    if ($q !== '') {
+        $where[] = '(o.code LIKE ? OR o.note LIKE ?)';
+        $like = '%' . addcslashes($q, '%_\\') . '%';
+        array_push($args, $like, $like);
+    }
     $sql = implode(' AND ', $where);
-    $stmt = db()->prepare(
+    $pdo = db();
+    // 不带 page 的老调用（桌面端）照旧一次给 200 条
+    [$page, $size, $offset] = isset($in['page']) ? page_args($in, 20, 100) : [1, 200, 0];
+    $total = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE $sql");
+    $total->execute($args);
+    $stmt = $pdo->prepare(
         "SELECT o.*, COALESCE(c.display_name, c.username) AS client,
+                c.wallet_network, c.wallet_token, c.wallet_address, c.wallet_updated_at,
                 SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding,
                 SUM(l.status IN ('superseded', 'refresh')) AS void,
-                SUM(IF(l.status = 'paid', l.amount_due, 0)) AS paid_usd, SUM(IF(l.status = 'paid', l.amount_cny, 0)) AS paid_cny
+                SUM(IF(l.status = 'paid', l.amount_due, 0)) AS paid_usd, SUM(IF(l.status = 'paid', l.amount_cny, 0)) AS paid_cny,
+                (SELECT COUNT(*) FROM settlements s WHERE s.order_id = o.id) AS settlements
          FROM orders o LEFT JOIN clients c ON c.id = o.client_id LEFT JOIN links l ON l.order_id = o.id
-         WHERE $sql GROUP BY o.id ORDER BY o.status = 'open' DESC, o.id DESC LIMIT 200"
+         WHERE $sql GROUP BY o.id ORDER BY o.status = 'open' DESC, o.id DESC LIMIT $size OFFSET $offset"
     );
     $stmt->execute($args);
-    json_out(['ok' => true, 'orders' => $stmt->fetchAll()]);
+    json_out(['ok' => true, 'total' => (int) $total->fetchColumn(), 'page' => $page, 'page_size' => $size, 'orders' => $stmt->fetchAll()]);
 }
 
 /** 派单：给客户开一个批次（档位 × 数量），更换上限默认等于数量 */

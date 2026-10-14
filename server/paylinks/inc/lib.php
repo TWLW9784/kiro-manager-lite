@@ -421,3 +421,107 @@ function require_admin(): void
     $token = $_SERVER['HTTP_X_CSRF_TOKEN'] ?? '';
     if (!hash_equals($_SESSION['admin_csrf'] ?? '', $token)) fail('页面已过期，请刷新', 403, 'csrf');
 }
+
+// ============ 分页 ============
+
+/** 分页参数：page 从 1 开始，page_size 限制在 [min, max]；返回 [page, size, offset] */
+function page_args(array $in, int $default = 20, int $max = 200): array
+{
+    $page = max(1, (int) ($in['page'] ?? 1));
+    $size = max(5, min($max, (int) ($in['page_size'] ?? $default)));
+    return [$page, $size, ($page - 1) * $size];
+}
+
+// ============ 结算：网络 / 地址 / 凭证 ============
+
+/**
+ * 支持的收款网络。默认 Polygon（手续费低，日常都走这条）。
+ * address / tx：地址与交易哈希的格式；explorer：区块浏览器上查交易的地址前缀。
+ */
+const NETWORKS = [
+    'polygon' => ['name' => 'Polygon', 'address' => '/^0x[0-9a-fA-F]{40}$/', 'tx' => '/^0x[0-9a-fA-F]{64}$/', 'explorer' => 'https://polygonscan.com/tx/'],
+    'ethereum' => ['name' => 'Ethereum', 'address' => '/^0x[0-9a-fA-F]{40}$/', 'tx' => '/^0x[0-9a-fA-F]{64}$/', 'explorer' => 'https://etherscan.io/tx/'],
+    'bsc' => ['name' => 'BNB Chain', 'address' => '/^0x[0-9a-fA-F]{40}$/', 'tx' => '/^0x[0-9a-fA-F]{64}$/', 'explorer' => 'https://bscscan.com/tx/'],
+    'arbitrum' => ['name' => 'Arbitrum', 'address' => '/^0x[0-9a-fA-F]{40}$/', 'tx' => '/^0x[0-9a-fA-F]{64}$/', 'explorer' => 'https://arbiscan.io/tx/'],
+    'tron' => ['name' => 'Tron', 'address' => '/^T[1-9A-HJ-NP-Za-km-z]{33}$/', 'tx' => '/^[0-9a-fA-F]{64}$/', 'explorer' => 'https://tronscan.org/#/transaction/'],
+];
+const TOKENS = ['USDT', 'USDC'];
+
+function network_or_default(string $n): string
+{
+    return isset(NETWORKS[$n]) ? $n : 'polygon';
+}
+
+function valid_address(string $network, string $address): bool
+{
+    return isset(NETWORKS[$network]) && preg_match(NETWORKS[$network]['address'], $address) === 1;
+}
+
+function valid_tx_hash(string $network, string $hash): bool
+{
+    return isset(NETWORKS[$network]) && preg_match(NETWORKS[$network]['tx'], $hash) === 1;
+}
+
+/** 前端用：网络列表（名称、浏览器前缀），不带正则 */
+function networks_public(): array
+{
+    $out = [];
+    foreach (NETWORKS as $k => $n) $out[] = ['id' => $k, 'name' => $n['name'], 'explorer' => $n['explorer']];
+    return $out;
+}
+
+function proofs_dir(): string
+{
+    return __DIR__ . '/proofs';
+}
+
+/**
+ * 存一张付款凭证。只收 jpg / png / webp / pdf，5 MB 以内；图片用 GD 重新编码一遍（去掉 EXIF 与夹带的数据），
+ * 文件名随机，放在 /inc/ 下（nginx 禁止直接访问），只能经 api.php?action=proof 带登录读。
+ * @return array{0:string,1:string} [文件名, MIME]
+ */
+function store_proof(array $file): array
+{
+    if (($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string) $file['tmp_name'])) fail('凭证上传失败');
+    if ((int) $file['size'] > 5 * 1024 * 1024) fail('凭证不能超过 5 MB');
+    $mime = (new finfo(FILEINFO_MIME_TYPE))->file((string) $file['tmp_name']) ?: '';
+    $exts = ['image/jpeg' => 'jpg', 'image/png' => 'png', 'image/webp' => 'webp', 'application/pdf' => 'pdf'];
+    if (!isset($exts[$mime])) fail('凭证只支持 JPG / PNG / WEBP 图片或 PDF');
+    $name = bin2hex(random_bytes(16)) . '.' . $exts[$mime];
+    $dest = proofs_dir() . '/' . $name;
+    if ($mime === 'application/pdf') {
+        if (!move_uploaded_file((string) $file['tmp_name'], $dest)) fail('凭证保存失败');
+    } else {
+        $img = @imagecreatefromstring((string) file_get_contents((string) $file['tmp_name']));
+        if (!$img) fail('图片读不出来，换一张试试');
+        $ok = match ($mime) {
+            'image/png' => imagepng($img, $dest, 6),
+            'image/webp' => imagewebp($img, $dest, 85),
+            default => imagejpeg($img, $dest, 88),
+        };
+        imagedestroy($img);
+        if (!$ok) fail('凭证保存失败');
+    }
+    return [$name, $mime];
+}
+
+/** 输出凭证文件；调用方先做权限检查 */
+function send_proof(string $name, string $mime): never
+{
+    $path = proofs_dir() . '/' . basename($name);
+    if ($name === '' || !preg_match('/^[a-f0-9]{32}\.(jpg|png|webp|pdf)$/', $name) || !is_file($path)) fail('凭证不存在', 404);
+    header('Content-Type: ' . $mime);
+    header('Content-Length: ' . filesize($path));
+    header('Content-Disposition: inline; filename="proof-' . substr($name, 0, 8) . '.' . pathinfo($name, PATHINFO_EXTENSION) . '"');
+    header('Cache-Control: private, max-age=3600');
+    header("Content-Security-Policy: default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox");
+    readfile($path);
+    exit;
+}
+
+/** 批次应结金额 = 已付款链接的实付合计（USD）；按批次重算结算状态，管理员手动改过的以手动为准 */
+function settle_status_for(float $due, float $settled): string
+{
+    if ($settled <= 0) return 'unsettled';
+    return $settled + 0.005 >= $due ? 'settled' : 'partial';
+}

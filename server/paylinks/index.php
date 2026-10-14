@@ -1,12 +1,14 @@
 <?php
+// 客户门户：概览 / 我的批次 / 待付款 / 已付款 / 结算记录 / 收款设置。数据都走 api.php 的分页接口
 declare(strict_types=1);
 require __DIR__ . '/inc/lib.php';
 header('X-Content-Type-Options: nosniff');
 header('X-Frame-Options: DENY');
 header('Cache-Control: no-store');
+header('Referrer-Policy: same-origin');
 $authed = logged_in();
 $csrf = $authed ? csrf_token() : '';
-$v = '4';
+$v = '11';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>
@@ -14,108 +16,58 @@ $v = '4';
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>Payment links</title>
-<link rel="stylesheet" href="assets/app.css?v=<?= $v ?>">
+<link rel="stylesheet" href="assets/ui.css?v=<?= $v ?>">
 <script src="assets/i18n.js?v=<?= $v ?>"></script>
 </head>
 <body>
 <?php if (!$authed): ?>
-<main class="login-wrap">
-  <form id="login" class="card login-card" autocomplete="on">
-    <div class="login-head">
-      <h1 data-i18n="title">支付链接</h1>
-      <select id="lang" class="lang" aria-label="Language"></select>
-    </div>
-    <p class="muted" data-i18n="login_hint">请登录后领取链接</p>
-    <label><span data-i18n="username">账号</span><input name="username" autocomplete="username" required></label>
-    <label><span data-i18n="password">密码</span><input name="password" type="password" autocomplete="current-password" required></label>
-    <button type="submit" class="btn primary" data-i18n="login">登录</button>
+<main class="auth">
+  <form id="login" class="card auth-card" autocomplete="on">
+    <div class="brand"><div class="brand-mark">P</div><div><b data-i18n="title">支付链接</b><span data-i18n="portal_sub">客户门户</span></div></div>
+    <p class="text-2" style="margin:0" data-i18n="login_hint">请登录后领取链接</p>
+    <label class="field"><span data-i18n="username">账号</span><input name="username" autocomplete="username" required></label>
+    <label class="field"><span data-i18n="password">密码</span><input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit" class="btn primary block" data-i18n="login">登录</button>
     <p id="login-error" class="error" role="alert"></p>
+    <div class="auth-foot"><span class="muted small">© Payment links</span><select id="lang" aria-label="Language" style="width:auto"></select></div>
   </form>
 </main>
 <script src="assets/login.js?v=<?= $v ?>"></script>
 <?php else: ?>
-<main class="app" data-csrf="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
-  <header class="card head">
-    <div>
-      <h1 data-i18n="title">支付链接</h1>
-      <p class="muted small"><span id="who"></span> · <span data-i18n="auto_refresh">每 3 秒自动刷新</span> · <span id="updated"></span></p>
+<div class="shell" data-csrf="<?= htmlspecialchars($csrf, ENT_QUOTES) ?>">
+  <aside class="sidebar">
+    <div class="brand"><div class="brand-mark">P</div><div><b data-i18n="title">支付链接</b><span data-i18n="portal_sub">客户门户</span></div></div>
+    <nav class="nav" aria-label="Main">
+      <button class="nav-item" data-view="overview"><span class="nav-ico">◧</span><span data-i18n="nav_overview">概览</span></button>
+      <button class="nav-item" data-view="orders"><span class="nav-ico">▤</span><span data-i18n="nav_orders">我的批次</span><span class="count" id="nav-orders"></span></button>
+      <button class="nav-item" data-view="pending"><span class="nav-ico">⧗</span><span data-i18n="nav_pending">待付款</span><span class="count" id="nav-pending"></span></button>
+      <button class="nav-item" data-view="paid"><span class="nav-ico">✓</span><span data-i18n="nav_paid">已付款</span></button>
+      <button class="nav-item" data-view="settlements"><span class="nav-ico">⇄</span><span data-i18n="nav_settlements">结算记录</span></button>
+      <button class="nav-item" data-view="wallet"><span class="nav-ico">◎</span><span data-i18n="nav_wallet">收款设置</span></button>
+    </nav>
+    <div class="sidebar-foot">
+      <div class="user-chip"><div class="avatar" id="avatar">-</div><div style="min-width:0"><b id="who" class="nowrap"></b><div class="muted small" id="updated"></div></div></div>
+      <div class="btn-group"><select id="lang" aria-label="Language" style="width:auto;height:30px"></select><button id="logout" class="btn sm" data-i18n="logout">退出登录</button></div>
     </div>
-    <div class="stats">
-      <div class="stat"><b id="stat-available">-</b><span data-i18n="stat_available">可领取</span></div>
-      <div class="stat warn"><b id="stat-claimed">-</b><span data-i18n="stat_claimed">待付款</span></div>
-      <div class="stat ok"><b id="stat-paid">-</b><span data-i18n="stat_paid">已付款（累计）</span></div>
-      <div class="stat ok"><b id="stat-today">-</b><span data-i18n="stat_today">今日已付</span></div>
-    </div>
-    <select id="lang" class="lang" aria-label="Language"></select>
-    <button id="logout" class="btn ghost" data-i18n="logout">退出登录</button>
-  </header>
-
-  <!-- 我的批次：管理员派单后才有；只能在批次额度内领，链接异常可以更换 -->
-  <section class="card claim">
-    <h2 data-i18n="orders_title">我的批次</h2>
-    <div id="orders" class="orders"></div>
-    <p id="claim-msg" class="muted small" role="status"></p>
-    <p id="claim-rule" class="muted small"></p>
-  </section>
-
-  <div class="columns">
-    <section class="card col">
-      <div class="col-head">
-        <h2><span data-i18n="pending_title">待付款</span> <span id="claimed-count" class="badge warn">0</span></h2>
-        <div class="actions" id="pending-actions">
-          <button class="btn" data-act="select-all" data-i18n="select_all">全选</button>
-          <button class="btn" data-act="select-none" data-i18n="select_none">清空选择</button>
-          <button class="btn primary" data-act="copy" data-i18n="copy_selected">复制所选</button>
-          <button class="btn" data-act="txt" data-i18n="export_txt">导出所选 TXT</button>
-          <button class="btn danger" data-act="release" data-i18n="release_selected">放回所选</button>
-          <span id="selected" class="muted small"></span>
-        </div>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th class="c-check"><input type="checkbox" id="check-all" data-i18n-label="select_all"></th>
-            <th class="c-n">#</th>
-            <th class="c-batch" data-i18n="col_batch">批次</th>
-            <th class="c-tier" data-i18n="col_tier">档位 / 金额</th>
-            <th data-i18n="col_link">支付链接</th>
-            <th class="c-time" data-i18n="col_left">剩余时间</th>
-            <th class="c-act"></th>
-          </tr></thead>
-          <tbody id="claimed"></tbody>
-        </table>
-        <p id="claimed-empty" class="empty" data-i18n="no_claimed">还没有领取链接</p>
-      </div>
-    </section>
-
-    <section class="card col paid-col">
-      <div class="col-head">
-        <h2><span data-i18n="paid_title">已付款</span> <span id="paid-count" class="badge ok">0</span></h2>
-        <div class="actions">
-          <label class="small"><span data-i18n="from">从</span><input id="from" type="date"></label>
-          <label class="small"><span data-i18n="to">到</span><input id="to" type="date"></label>
-          <button class="btn" id="export-paid" data-i18n="export_csv">导出对账 CSV</button>
-        </div>
-      </div>
-      <div id="daily" class="daily"></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th class="c-n">#</th>
-            <th class="c-batch" data-i18n="col_batch">批次</th>
-            <th class="c-tier" data-i18n="col_tier">档位 / 金额</th>
-            <th data-i18n="col_link">支付链接</th>
-            <th class="c-time" data-i18n="col_paid_at">付款时间</th>
-          </tr></thead>
-          <tbody id="paid"></tbody>
-        </table>
-        <p id="paid-empty" class="empty" data-i18n="no_paid">还没有已付款的链接</p>
-      </div>
-    </section>
+  </aside>
+  <div class="main">
+    <header class="topbar">
+      <button class="btn ghost menu-btn" aria-label="Menu">☰</button>
+      <h1 id="page-title"></h1>
+      <span class="muted small" data-i18n="auto_refresh_s">自动刷新</span>
+    </header>
+    <main class="content">
+      <section data-section="overview" hidden></section>
+      <section data-section="orders" hidden></section>
+      <section data-section="pending" hidden></section>
+      <section data-section="paid" hidden></section>
+      <section data-section="settlements" hidden></section>
+      <section data-section="wallet" hidden></section>
+    </main>
   </div>
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
-</main>
-<script src="assets/app.js?v=<?= $v ?>"></script>
+</div>
+<script src="assets/ui.js?v=<?= $v ?>"></script>
+<script src="assets/portal.js?v=<?= $v ?>"></script>
 <?php endif; ?>
 </body>
 </html>
