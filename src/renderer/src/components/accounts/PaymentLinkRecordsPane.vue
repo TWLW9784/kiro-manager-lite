@@ -21,9 +21,12 @@ import {
   FileTextOutlined,
   RedoOutlined,
   SafetyCertificateOutlined,
-  SearchOutlined
+  SearchOutlined,
+  UserAddOutlined
 } from '@ant-design/icons-vue'
 import PaymentLinkTxtModal from '@/components/accounts/PaymentLinkTxtModal.vue'
+import AssignLinksModal from '@/components/accounts/AssignLinksModal.vue'
+import { adminConfigured } from '@/utils/paylinksAdmin'
 import { useAccountsStore } from '@/stores/accounts'
 import { useSettingsStore } from '@/stores/settings'
 import { displayEmail } from '@/utils/display'
@@ -348,9 +351,14 @@ function claimedOnSite(account: Account): boolean {
   return s === 'claimed' || s === 'checking'
 }
 
+/** 已经导出 / 复制发出去了：别人手里拿的就是这条，默认不重新生成（重新生成会让它作废） */
+function sentOut(account: Account): boolean {
+  return !!account.paymentLink?.exportedAt
+}
+
 /** 现在重新生成能便宜多少（0 表示不值得换）；见 optimizableSaving */
 function savingOf(account: Account): number {
-  if (!account.paymentLink || claimedOnSite(account)) return 0
+  if (!account.paymentLink || claimedOnSite(account) || sentOut(account)) return 0
   if (paymentLinkState(account, now.value) !== 'pending') return 0
   return optimizableSaving(account.paymentLink, account.subscription.expiresAt, now.value)
 }
@@ -366,10 +374,18 @@ const reExtractTargets = computed(() => {
       return (state === 'pending' || state === 'expired') && !claimedOnSite(a)
     })
   }
+  // 没勾选时，已发出的只在确实失效了才重新提取
   return marked.value.filter(
     (a) => !claimedOnSite(a) && (paymentLinkState(a, now.value) === 'expired' || savingOf(a) > 0)
   )
 })
+
+// ============ 分配给网站客户 ============
+
+/** 可分配的：有链接、还没分配过的（付过款的也能分，网站上直接记已付） */
+const assignTargets = computed(() => targets.value.filter((a) => a.paymentLink && !a.paymentLink.assignedClientId))
+const siteReady = computed(() => adminConfigured())
+const assignOpen = ref(false)
 
 const optimizableCount = computed(() => marked.value.filter((a) => savingOf(a) > 0).length)
 
@@ -465,6 +481,7 @@ async function copyLinks(): Promise<void> {
     if (!list.length) return void message.info('没有还能付款的链接，可以先「重新提取」失效的')
     const skipped = dropped ? `，已跳过失效 / 已付款的 ${dropped} 条` : ''
     copyText(paymentLinkText(list), `已复制 ${list.length} 条支付链接${skipped}`)
+    accountsStore.markPaymentLinksExported(list)
   } finally {
     preparing.value = false
   }
@@ -494,6 +511,8 @@ async function exportXlsx(payable: boolean): Promise<void> {
     const res = await window.api.exportToXlsx(toPlain(sheet), paymentLinkFilename())
     if (!res.success) return void message.error(res.error || '导出失败')
     if (res.data?.saved) {
+      // 发出去的链接不再推到网站（除非之后手动分配给客户）
+      accountsStore.markPaymentLinksExported(list)
       auditExport(`导出支付链接 Excel → ${res.data.path ?? ""}`, list.map((a) => a.email))
       message.success(`已导出 ${sheet.rows.length} 条支付链接`)
     }
@@ -605,6 +624,22 @@ function clearOne(account: Account): void {
           <a-tag v-if="record.paymentLink.serverStatus === 'claimed'" color="orange" :bordered="false" class="saving-tag">
             网站已领取
           </a-tag>
+          <a-tooltip
+            v-if="record.paymentLink.assignedClientId"
+            :title="`已分配给网站客户，批次 ${record.paymentLink.assignedOrderCode || '-'}，网站上跟着付款状态走`"
+          >
+            <a-tag color="green" :bordered="false" class="saving-tag">
+              已分配{{ record.paymentLink.exportedTo ? ` · ${record.paymentLink.exportedTo}` : '' }}
+            </a-tag>
+          </a-tooltip>
+          <a-tooltip
+            v-else-if="record.paymentLink.exportedAt"
+            :title="`${new Date(record.paymentLink.exportedAt).toLocaleString()} 导出 / 复制发出，不会推到网站；要算进某个网站客户的结算，用「分配给网站客户」`"
+          >
+            <a-tag color="blue" :bordered="false" class="saving-tag">
+              已发出{{ record.paymentLink.exportedTo ? ` · ${record.paymentLink.exportedTo}` : '' }}
+            </a-tag>
+          </a-tooltip>
         </template>
         <template v-else-if="column.key === 'state'">
           <a-tooltip :title="rowMeta.get(record.id)?.tip">
@@ -706,6 +741,12 @@ function clearOne(account: Account): void {
           </a-menu>
         </template>
       </a-dropdown>
+      <a-tooltip title="把这些链接归到网站上某个客户名下（按「已领」记，计入他的结算）；有勾选按勾选">
+        <a-button :disabled="!assignTargets.length || !siteReady" @click="assignOpen = true">
+          <template #icon><UserAddOutlined /></template>
+          分配给网站客户（{{ assignTargets.length }}）
+        </a-button>
+      </a-tooltip>
       <span class="spacer" />
       <a-dropdown :disabled="!marked.length">
         <a-button danger :disabled="!marked.length">
@@ -730,6 +771,7 @@ function clearOne(account: Account): void {
       :accounts="txtAccounts"
       @close="txtAccounts = null"
     />
+    <AssignLinksModal v-if="assignOpen" :accounts="assignTargets" @close="assignOpen = false" />
   </div>
 </template>
 

@@ -605,6 +605,21 @@ export const useAccountsStore = defineStore('accounts', () => {
     }
   }
 
+  /**
+   * 导出 / 复制出去的链接记成「已发出」，网站同步不再推，已经推上去还没被领的会下架。
+   * 已经分配给网站客户的不动（本来就在那个客户名下）。
+   */
+  function markPaymentLinksExported(list: Account[], to = ''): void {
+    const at = Date.now()
+    // 网站上已经在客户手里的（已领 / 确认中 / 已付）也不动：它已经归那个客户了，再导出只是留档
+    const held = new Set(['claimed', 'checking', 'paid'])
+    patchPaymentLinks(
+      list
+        .filter((a) => a.paymentLink && !a.paymentLink.assignedClientId && !held.has(a.paymentLink.serverStatus ?? ''))
+        .map((a) => ({ id: a.id, url: a.paymentLink!.url, patch: { exportedAt: at, exportedTo: to || undefined } }))
+    )
+  }
+
   /** 记下「查过实付金额、没有优惠」，下次批量提取默认跳过 */
   function setDiscountCheck(id: string, check: AccountDiscountCheck): void {
     updateAccount(id, { discountCheck: check })
@@ -1454,6 +1469,7 @@ export const useAccountsStore = defineStore('accounts', () => {
     setPaymentLink,
     setStripeStatuses,
     patchPaymentLinks,
+    markPaymentLinksExported,
     setDiscountCheck,
     clearDiscountChecks,
     clearPaymentLinks,

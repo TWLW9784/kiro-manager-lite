@@ -491,6 +491,7 @@ function copyAll(): void {
   const list = extractedAccounts.value
   if (!list.length) return
   copyText(paymentLinkText(list), `已复制 ${list.length} 条支付链接`)
+  accountsStore.markPaymentLinksExported(list)
 }
 
 const exporting = ref(false)
@@ -506,6 +507,8 @@ async function exportXlsx(): Promise<void> {
     const res = await window.api.exportToXlsx(toPlain(sheet), paymentLinkFilename())
     if (!res.success) return void message.error(res.error || '导出失败')
     if (res.data?.saved) {
+      // 发出去的链接不再推到网站（除非之后手动分配给客户）
+      accountsStore.markPaymentLinksExported(list)
       auditExport(`导出支付链接 Excel → ${res.data.path ?? ""}`, list.map((a) => a.email))
       message.success(`已导出 ${sheet.rows.length} 条支付链接`)
     }

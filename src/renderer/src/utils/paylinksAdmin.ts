@@ -109,7 +109,27 @@ export const paylinksAdmin = {
   createOrder: (input: { client_id: number; tier: string; quantity: number; replace_limit?: number; note?: string }) =>
     call<{ id: number; code: string }>({ op: 'order_create', ...input }),
   updateOrder: (input: { id: number; quantity?: number; replace_limit?: number; status?: 'cancelled' }) =>
-    call({ op: 'order_update', ...input })
+    call({ op: 'order_update', ...input }),
+  assignLinks: (input: { client_id: number; note?: string; links: AssignLinkInput[] }) =>
+    call<{
+      assigned: number
+      code: string
+      orders: { code: string; tier: string; quantity: number }[]
+      conflicts: { url_hash: string; status: string }[]
+    }>({ op: 'assign_links', ...input })
+}
+
+/** 分配给客户时每条链接带上的数据（邮箱不上传，账号只给哈希） */
+export interface AssignLinkInput {
+  url: string
+  account_ref: string
+  tier: string
+  amount_due?: number
+  amount_cny?: number
+  list_price?: number
+  extracted_at: number
+  /** 本地已确认这个号付过款 */
+  paid: boolean
 }
 
 /** 一个派单批次 */

@@ -108,14 +108,17 @@ async function syncOnce(serverUrl: string, token: string): Promise<boolean> {
   const store = useAccountsStore()
   const since = useSettingsStore().settings.paylinksSyncSince || 0
   // 推送范围：本地待付款（Kiro 还是 Free、链接没被 Stripe 判死）的；
-  // 开启同步之前提取的不推（可能已经用 TXT 发出去了），已经推过的照常跟进
+  // 开启同步之前提取的不推（可能已经用 TXT 发出去了），已经推过的照常跟进；
+  // 导出 / 复制发出去的不推（别人手里已经有了），手动分配给网站客户的除外。
+  // 不在这里的、网站上还没被领的会被下架（见下面的回写）
   const pending = store.accounts.filter(
     (a) =>
       a.paymentLink &&
       !isPaidSubscription(a.subscription.type) &&
       a.paymentLink.stripeStatus !== 'complete' &&
       a.paymentLink.stripeStatus !== 'expired' &&
-      (a.paymentLink.createdAt >= since || !!a.paymentLink.syncedHash)
+      (a.paymentLink.createdAt >= since || !!a.paymentLink.syncedHash) &&
+      (!a.paymentLink.exportedAt || !!a.paymentLink.assignedClientId)
   )
   const marked = store.accounts.filter((a) => a.paymentLink)
   const hashes = await window.api.paylinksHashes({

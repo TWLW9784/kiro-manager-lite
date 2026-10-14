@@ -9,12 +9,14 @@
 //   link_revoke   收回客户手里的链接（标记换新，旧链接作废）
 //   link_resolve  手动定性卡在确认中的链接（桌面端找不到对应账号时用）
 //   logs          管理操作日志
+//   assign_links  把桌面端导出 / 线下发出去的链接分配给客户（按档位各建一个批次）
 // 会改数据的操作成功后都记进 admin_log
 declare(strict_types=1);
 
 /** 会改数据、要留痕的操作 */
 const ADMIN_LOGGED_OPS = [
     'client_save', 'client_delete', 'client_kick', 'link_revoke', 'link_resolve', 'order_create', 'order_update',
+    'assign_links',
 ];
 
 function action_admin(): never
@@ -28,6 +30,8 @@ function action_admin(): never
     if (in_array($op, ADMIN_LOGGED_OPS, true)) {
         $detail = $in;
         unset($detail['op']);
+        // 链接本身不进日志，只记条数
+        if (isset($detail['links'])) $detail['links'] = count((array) $detail['links']);
         on_json_ok(static fn (array $out) => admin_log($op, $detail + array_intersect_key($out, ['id' => 1, 'code' => 1, 'revoked' => 1, 'resolved' => 1])));
     }
     match ($op) {
@@ -40,6 +44,7 @@ function action_admin(): never
         'link_revoke' => admin_link_revoke($in),
         'link_resolve' => admin_link_resolve($in),
         'logs' => admin_logs($in),
+        'assign_links' => admin_assign_links($in),
         'orders' => admin_orders($in),
         'order_create' => admin_order_create($in),
         'order_update' => admin_order_update($in),
@@ -317,8 +322,18 @@ function admin_order_create(array $in): never
     $ok->execute([$clientId]);
     if (!$ok->fetch()) fail('客户不存在', 404);
     $limit = isset($in['replace_limit']) ? max(0, min(1000, (int) $in['replace_limit'])) : $qty;
+    [$id, $code] = insert_order($clientId, $tier, $qty, $limit, (string) ($in['note'] ?? ''));
+    json_out(['ok' => true, 'id' => $id, 'code' => $code]);
+}
+
+/**
+ * 建批次。批次号：B + 年月日 + 当天序号，按批次核对时好认。两人同时派单撞号时（uk_code）顺延重试
+ * @return array{0:int,1:string} [id, code]
+ */
+function insert_order(int $clientId, string $tier, int $qty, int $limit, string $note): array
+{
+    $pdo = db();
     $t = now();
-    // 批次号：B + 年月日 + 当天序号，按批次核对时好认。两人同时派单撞号时（uk_code）顺延重试
     $prefix = 'B' . date('ymd') . '-';
     $last = $pdo->prepare('SELECT code FROM orders WHERE code LIKE ? ORDER BY LENGTH(code) DESC, code DESC LIMIT 1');
     $last->execute([$prefix . '%']);
@@ -327,17 +342,103 @@ function admin_order_create(array $in): never
         "INSERT INTO orders (code, client_id, tier, quantity, replace_limit, note, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     );
-    $note = mb_substr(trim((string) ($in['note'] ?? '')), 0, 255);
+    $note = mb_substr(trim($note), 0, 255);
     for ($try = 0; ; $try++, $seq++) {
         $code = sprintf('%s%02d', $prefix, $seq);
         try {
             $insert->execute([$code, $clientId, $tier, $qty, $limit, $note, $t, $t]);
-            break;
+            return [(int) $pdo->lastInsertId(), $code];
         } catch (PDOException $e) {
             if ($e->errorInfo[1] !== 1062 || $try >= 5) throw $e;
         }
     }
-    json_out(['ok' => true, 'id' => (int) $pdo->lastInsertId(), 'code' => $code]);
+}
+
+/**
+ * 分配：桌面端导出 / 线下发出去的链接，手动归到某个客户名下。
+ * 链接已经在客户手里了，所以直接记成「已领」（本地确认付过的记「已付」），不进公共池子。
+ * 按档位各建一个批次，数量 = 这次分进去的条数。
+ * 网站上已经归别的客户、或者已付款的不动，作为冲突返回。
+ * links: [{url, account_ref, tier, amount_due, amount_cny, list_price, extracted_at, paid}]
+ */
+function admin_assign_links(array $in): never
+{
+    $pdo = db();
+    $clientId = (int) ($in['client_id'] ?? 0);
+    $chk = $pdo->prepare('SELECT id FROM clients WHERE id = ?');
+    $chk->execute([$clientId]);
+    if (!$chk->fetch()) fail('客户不存在', 404);
+    $links = array_values(array_filter((array) ($in['links'] ?? []), 'is_array'));
+    if (!$links || count($links) > 500) fail('一次分配 1 到 500 条');
+    $note = (string) ($in['note'] ?? '');
+    $t = now();
+    $num = static fn ($v) => is_numeric($v) ? round((float) $v, 2) : null;
+
+    $find = $pdo->prepare('SELECT id, status, client_id FROM links WHERE url_hash = ?');
+    $paidOf = $pdo->prepare("SELECT COUNT(*) FROM links WHERE account_ref = ? AND status = 'paid'");
+    $insert = $pdo->prepare(
+        "INSERT INTO links (url_hash, url, account_ref, tier, amount_due, amount_cny, list_price, status, client_id, order_id,
+                            claimed_at, paid_at, extracted_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    $update = $pdo->prepare(
+        "UPDATE links SET status = ?, client_id = ?, order_id = ?, claimed_at = COALESCE(claimed_at, ?), claim_batch = NULL,
+                paid_at = IF(? = 'paid', COALESCE(paid_at, ?), NULL), refresh_reason = NULL, updated_at = ?
+         WHERE id = ?"
+    );
+
+    $pdo->beginTransaction();
+    try {
+        // 先挑出能分的，按档位分组，再建批次
+        $byTier = [];
+        $conflicts = [];
+        foreach ($links as $l) {
+            $url = (string) ($l['url'] ?? '');
+            $ref = (string) ($l['account_ref'] ?? '');
+            $tier = substr(trim((string) ($l['tier'] ?? '')), 0, 16);
+            if (!preg_match('#^https://checkout\.stripe\.com/#', $url) || !preg_match('/^[a-f0-9]{64}$/', $ref) || $tier === '') {
+                fail('链接数据不完整');
+            }
+            $hash = hash('sha256', $url);
+            $find->execute([$hash]);
+            $row = $find->fetch() ?: null;
+            // 已经归别的客户（还没作废），或者已经付过款：不动
+            if ($row && (($row['client_id'] && (int) $row['client_id'] !== $clientId && $row['status'] !== 'superseded')
+                || $row['status'] === 'paid')) {
+                $conflicts[] = ['url_hash' => $hash, 'status' => $row['status']];
+                continue;
+            }
+            $paidOf->execute([$ref]);
+            $paid = !empty($l['paid']) && (int) $paidOf->fetchColumn() === 0;
+            $byTier[$tier][] = ['l' => $l, 'hash' => $hash, 'row' => $row, 'paid' => $paid, 'ref' => $ref, 'url' => $url];
+        }
+        $orders = [];
+        foreach ($byTier as $tier => $items) {
+            [$orderId, $code] = insert_order($clientId, $tier, count($items), count($items), $note);
+            $orders[] = ['code' => $code, 'tier' => $tier, 'quantity' => count($items)];
+            foreach ($items as $it) {
+                $status = $it['paid'] ? 'paid' : 'claimed';
+                if ($it['row']) {
+                    $update->execute([$status, $clientId, $orderId, $t, $status, $t, $t, (int) $it['row']['id']]);
+                } else {
+                    $l = $it['l'];
+                    $at = is_numeric($l['extracted_at'] ?? null) ? date('Y-m-d H:i:s', (int) ($l['extracted_at'] / 1000)) : $t;
+                    $insert->execute([
+                        $it['hash'], $it['url'], $it['ref'], $tier, $num($l['amount_due'] ?? null), $num($l['amount_cny'] ?? null),
+                        $num($l['list_price'] ?? null), $status, $clientId, $orderId, $t, $it['paid'] ? $t : null, $at, $t, $t,
+                    ]);
+                }
+            }
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+    close_done_orders();
+    $codes = array_column($orders, 'code');
+    $assigned = array_sum(array_column($orders, 'quantity'));
+    json_out(['ok' => true, 'assigned' => $assigned, 'orders' => $orders, 'code' => implode(',', $codes), 'conflicts' => $conflicts]);
 }
 
 /**

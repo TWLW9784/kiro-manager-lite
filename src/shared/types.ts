@@ -248,6 +248,17 @@ export interface AccountPaymentLink {
   stripeStatus?: CheckoutSessionStatus
   /** stripeStatus 的查询时间戳（ms） */
   stripeCheckedAt?: number
+  /**
+   * 导出成 TXT / Excel（或复制）发出去的时间戳（ms）。发出去的链接不再推到网站：
+   * 别人手里已经有了，网站上再让客户领会两头卖。手动分配给客户后才推（见 assignedClientId）
+   */
+  exportedAt?: number
+  /** 导出时填的接收人（TXT 的「发给谁」；Excel 为空） */
+  exportedTo?: string
+  /** 手动分配给网站上的哪个客户；分配后按「已领」推到这个客户名下 */
+  assignedClientId?: number
+  /** 分配时网站建的批次号 */
+  assignedOrderCode?: string
   /** 提取时间戳（ms） */
   createdAt: number
 }
