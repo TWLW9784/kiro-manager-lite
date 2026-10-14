@@ -70,7 +70,8 @@ onUnmounted(() => clearInterval(timer))
 </script>
 
 <template>
-  <div class="shell" :class="{ 'nav-open': navOpen }">
+  <!-- wide：后台表格列多，内容区最大宽度放到 1600（门户 1400） -->
+  <div class="shell wide" :class="{ 'nav-open': navOpen }">
     <div v-if="navOpen" class="nav-backdrop" @click="navOpen = false" />
     <aside class="sidebar">
       <div class="brand">

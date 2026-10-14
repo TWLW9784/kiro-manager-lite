@@ -190,7 +190,7 @@ async function copyPage(): Promise<void> {
           <div v-if="num(row.amount_cny)" class="muted small">{{ cny(row.amount_cny) }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="客户" width="100" show-overflow-tooltip>
+      <el-table-column label="客户" min-width="100" show-overflow-tooltip>
         <template #default="{ row }">{{ row.client ?? '-' }}</template>
       </el-table-column>
       <el-table-column label="链接" min-width="190">
@@ -198,14 +198,14 @@ async function copyPage(): Promise<void> {
           <PaylinkUrl :url="row.url" :void="row.status === 'superseded'" tip="点击复制整条链接" />
         </template>
       </el-table-column>
-      <el-table-column label="时间" width="120">
+      <el-table-column label="时间" min-width="120">
         <template #default="{ row }">
           <span class="small muted">
             {{ row.paid_at ? `付 ${dt(row.paid_at)}` : row.claimed_at ? `领 ${dt(row.claimed_at)}` : `提 ${dt(row.extracted_at)}` }}
           </span>
         </template>
       </el-table-column>
-      <el-table-column width="150" align="right">
+      <el-table-column min-width="150" align="right">
         <template #default="{ row }">
           <template v-if="row.status === 'checking'">
             <el-button size="small" @click="resolve(row, 'paid')">已付</el-button>

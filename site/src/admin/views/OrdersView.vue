@@ -116,7 +116,7 @@ async function changed(): Promise<void> {
           <div class="muted small">目标 {{ row.quantity }}</div>
         </template>
       </el-table-column>
-      <el-table-column label="进度" width="190">
+      <el-table-column label="进度" min-width="190">
         <template #default="{ row }">
           <el-progress
             :percentage="Math.min(100, Math.round((num(row.paid) / Math.max(1, row.quantity)) * 100))"

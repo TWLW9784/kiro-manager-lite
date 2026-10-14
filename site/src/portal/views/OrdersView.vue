@@ -103,7 +103,7 @@ const refilter = (): void => {
           <div class="muted small">{{ tt('col_target') }} {{ row.quantity }}</div>
         </template>
       </el-table-column>
-      <el-table-column :label="tt('col_progress')" width="200">
+      <el-table-column :label="tt('col_progress')" min-width="200">
         <template #default="{ row }">
           <el-progress
             :percentage="Math.min(100, Math.round((num(row.paid) / Math.max(1, row.quantity)) * 100))"

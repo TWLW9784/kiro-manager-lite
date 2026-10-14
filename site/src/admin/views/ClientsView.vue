@@ -72,7 +72,7 @@ async function remove(c: AdminClient): Promise<void> {
           <el-tag size="small" :type="row.enabled ? 'success' : undefined">{{ row.enabled ? '启用' : '已停用' }}</el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="收款地址" width="200">
+      <el-table-column label="收款地址" min-width="200">
         <template #default="{ row }">
           <template v-if="row.wallet_address">
             <div class="muted small">{{ row.wallet_token }}</div>

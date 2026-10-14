@@ -75,7 +75,7 @@ async function changed(): Promise<void> {
       <el-table-column label="待结算" width="100" align="right">
         <template #default="{ row }"><b class="warn num">{{ usd(row.unsettled) }}</b></template>
       </el-table-column>
-      <el-table-column label="收款地址" width="210">
+      <el-table-column label="收款地址" min-width="210">
         <template #default="{ row }">
           <template v-if="row.wallet_address">
             <el-tooltip :content="row.wallet_address" placement="top">
@@ -87,7 +87,7 @@ async function changed(): Promise<void> {
           <el-tag v-else size="small" type="warning">未设置</el-tag>
         </template>
       </el-table-column>
-      <el-table-column width="170" align="right">
+      <el-table-column min-width="170" align="right">
         <template #default="{ row }">
           <el-button size="small" @click="emit('goto', 'orders', { clientId: row.id, settle: 'unsettled' })">未结批次</el-button>
           <el-button size="small" type="primary" @click="paying = { clientId: row.id }">打款</el-button>

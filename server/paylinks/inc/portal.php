@@ -202,7 +202,7 @@ function action_my_paid(): never
 function settlement_rows(string $where, array $args, int $size, int $offset): array
 {
     $stmt = db()->prepare(
-        "SELECT s.id, s.client_id, COALESCE(c.display_name, c.username) AS client, s.order_id, o.code, s.amount, s.token, s.network,
+        "SELECT s.id, s.client_id, COALESCE(NULLIF(c.display_name, ''), c.username) AS client, s.order_id, o.code, s.amount, s.token, s.network,
                 s.to_address, s.tx_hash, s.proof_file <> '' AS has_proof, s.proof_mime, s.note, s.created_by, s.paid_at, s.created_at
          FROM settlements s LEFT JOIN orders o ON o.id = s.order_id LEFT JOIN clients c ON c.id = s.client_id
          WHERE $where ORDER BY s.paid_at DESC, s.id DESC LIMIT $size OFFSET $offset"

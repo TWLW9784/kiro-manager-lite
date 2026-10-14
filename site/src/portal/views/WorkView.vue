@@ -241,7 +241,7 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
     <el-button size="small" type="primary" @click="emit('goto', 'wallet')">{{ tt('wallet_edit') }}</el-button>
   </el-alert>
 
-  <div v-if="stats && hasActivity" class="stats">
+  <div v-if="stats && hasActivity" class="stats cols-5">
     <el-card shadow="never" body-class="stat-body">
       <div class="stat-label">{{ tt('stat_pending') }}</div>
       <div class="stat-value warn">{{ stats.claimed + stats.checking }}</div>

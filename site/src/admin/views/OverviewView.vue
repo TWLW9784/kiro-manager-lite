@@ -25,12 +25,35 @@ const paidToday = computed(() =>
 )
 const unsettledTotal = computed(() => Math.max(0, num(overview.value?.settle.due) - num(overview.value?.settle.settled)))
 
-/** 近 14 天：按客户 × 日期 */
-const days = computed(() => [...new Set((overview.value?.daily ?? []).map((d) => d.day))].sort().reverse())
+/**
+ * 近 14 天：客户 × 日期。
+ * 日期列固定是完整的 14 天（最新在前），没付款的那天显示「–」：只列有数据的
+ * 日子时，才两天数据就只有两列，客户那一列占了整张表 89% 的宽度；而且看不出
+ * 哪天断了。服务端也是按 CURDATE() 往前 13 天取的数，这里对齐。
+ */
+const days = computed(() => {
+  const end = today.value
+  if (!end) return [] as string[]
+  const [y, m, d] = end.split('-').map(Number)
+  // 用 UTC 推日期，避免本地时区把日子算偏
+  return Array.from({ length: 14 }, (_, i) => new Date(Date.UTC(y, m - 1, d - i)).toISOString().slice(0, 10))
+})
+/** 按 client_id 归行（不是按名字：重名的两个客户不能合成一行）；没有客户的是线下发出、没分配的链接 */
 const perClient = computed(() => {
-  const out: Record<string, Record<string, number>> = {}
-  for (const d of overview.value?.daily ?? []) ((out[d.client || '-'] ??= {})[d.day] = num(d.n))
-  return Object.entries(out).map(([name, byDay]) => ({ name, byDay }))
+  const out = new Map<string, { name: string; byDay: Record<string, number>; total: number; none: boolean }>()
+  for (const d of overview.value?.daily ?? []) {
+    const none = d.client_id === null
+    const key = none ? 'none' : String(d.client_id)
+    // 「未分配客户」只给真的没有客户的行。有客户但名字为空时退回编号，
+    // 不能也写成「未分配客户」—— 之前 kycduke 就因此和真正未分配的混成两行同名
+    const name = none ? '未分配客户' : d.client || `客户 #${d.client_id}`
+    const row = out.get(key) ?? { name, byDay: {}, total: 0, none }
+    row.byDay[d.day] = (row.byDay[d.day] ?? 0) + num(d.n)
+    row.total += num(d.n)
+    out.set(key, row)
+  }
+  // 付得多的排前面，「未分配客户」放最后
+  return [...out.values()].sort((a, b) => Number(a.none) - Number(b.none) || b.total - a.total)
 })
 
 const reload = (): void =>
@@ -60,7 +83,7 @@ const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
     <el-button size="small" @click="emit('goto', 'links', { linkStatus: 'checking' })">去处理</el-button>
   </el-alert>
 
-  <div class="stats">
+  <div class="stats cols-8">
     <el-card v-for="k in CARDS" :key="k" shadow="never">
       <div class="stat-label">
         <el-tag size="small" :type="LINK_STATUS[k].type || undefined">{{ LINK_STATUS[k].text }}</el-tag>
@@ -146,7 +169,7 @@ const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
           </template>
         </template>
       </el-table-column>
-      <el-table-column label="收款地址" width="180">
+      <el-table-column label="收款地址" min-width="180">
         <template #default="{ row }">
           <template v-if="row.wallet_address">
             <el-tooltip :content="row.wallet_address" placement="top">
@@ -158,7 +181,7 @@ const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
           <el-tag v-else size="small" type="warning">未设置</el-tag>
         </template>
       </el-table-column>
-      <el-table-column width="100" align="right">
+      <el-table-column min-width="100" align="right">
         <template #default="{ row }">
           <el-button size="small" text type="primary" @click="emit('goto', 'orders', { clientId: row.id, settle: 'unsettled' })">
             未结批次
@@ -169,12 +192,24 @@ const CARDS = ['available', 'claimed', 'checking', 'paid', 'refresh'] as const
     </el-table>
   </el-card>
 
-  <el-card v-if="days.length" shadow="never">
+  <el-card v-if="perClient.length" shadow="never">
     <template #header><h2 class="head">近 14 天已付款</h2></template>
     <el-table :data="perClient" size="small">
-      <el-table-column prop="name" label="客户" min-width="120" />
-      <el-table-column v-for="d in days" :key="d" :label="d.slice(5)" width="72" align="right">
-        <template #default="{ row }">{{ row.byDay[d] ?? '' }}</template>
+      <!-- 客户列固定宽度并钉在左边：窄屏横向拖动时还能看到是哪个客户 -->
+      <el-table-column label="客户" width="140" fixed="left" show-overflow-tooltip>
+        <template #default="{ row }">
+          <span :class="{ muted: row.none }">{{ row.name }}</span>
+        </template>
+      </el-table-column>
+      <el-table-column label="合计" width="72" align="right">
+        <template #default="{ row }"><b class="num">{{ row.total }}</b></template>
+      </el-table-column>
+      <!-- 日期列平分剩下的宽度 -->
+      <el-table-column v-for="d in days" :key="d" :label="d === today ? '今天' : d.slice(5)" min-width="58" align="center">
+        <template #default="{ row }">
+          <span v-if="row.byDay[d]" class="num">{{ row.byDay[d] }}</span>
+          <span v-else class="muted">–</span>
+        </template>
       </el-table-column>
     </el-table>
   </el-card>

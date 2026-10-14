@@ -73,7 +73,8 @@ async function remove(s: Settlement): Promise<void> {
         <span class="muted small"> {{ row.token }}</span>
       </template>
     </el-table-column>
-    <el-table-column label="网络 / 地址" width="168">
+    <!-- 地址、交易、备注三列一起分剩余宽度，不再全给备注 -->
+    <el-table-column label="网络 / 地址" min-width="168">
       <template #default="{ row }">
         <div class="muted small">{{ row.network_name }}</div>
         <el-tooltip :content="row.to_address || '-'" placement="top">
@@ -81,7 +82,7 @@ async function remove(s: Settlement): Promise<void> {
         </el-tooltip>
       </template>
     </el-table-column>
-    <el-table-column label="交易" width="150">
+    <el-table-column label="交易" min-width="150">
       <template #default="{ row }">
         <el-link v-if="row.tx_url" type="primary" :href="row.tx_url" target="_blank" rel="noopener noreferrer" class="mono">
           {{ short(row.tx_hash) }} ↗

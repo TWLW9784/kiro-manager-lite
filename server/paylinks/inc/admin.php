@@ -63,7 +63,7 @@ function admin_overview(): never
          FROM links WHERE status <> 'superseded' GROUP BY status, tier"
     )->fetchAll();
     $daily = $pdo->query(
-        "SELECT DATE(l.paid_at) AS day, l.client_id, COALESCE(c.display_name, c.username, '') AS client,
+        "SELECT DATE(l.paid_at) AS day, l.client_id, COALESCE(NULLIF(c.display_name, ''), c.username, '') AS client,
                 COUNT(*) AS n, SUM(l.amount_due) AS usd, SUM(l.amount_cny) AS cny
          FROM links l LEFT JOIN clients c ON c.id = l.client_id
          WHERE l.status = 'paid' AND l.paid_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY)
@@ -272,7 +272,7 @@ function admin_links(array $in): never
     $offset = ($page - 1) * $size;
     $stmt = $pdo->prepare(
         "SELECT l.id, l.url_hash, l.account_ref, l.url, l.tier, l.amount_due, l.amount_cny, l.status,
-                l.client_id, COALESCE(c.display_name, c.username) AS client, l.claimed_at, l.paid_at,
+                l.client_id, COALESCE(NULLIF(c.display_name, ''), c.username) AS client, l.claimed_at, l.paid_at,
                 l.refresh_reason, l.stripe_status, l.stripe_checked_at, l.extracted_at, l.updated_at
          FROM links l LEFT JOIN clients c ON c.id = l.client_id
          WHERE $sql ORDER BY l.updated_at DESC, l.id DESC LIMIT $size OFFSET $offset"
@@ -380,7 +380,7 @@ function admin_orders(array $in): never
     $total = $pdo->prepare("SELECT COUNT(*) FROM orders o WHERE $sql");
     $total->execute($args);
     $stmt = $pdo->prepare(
-        "SELECT o.*, COALESCE(c.display_name, c.username) AS client,
+        "SELECT o.*, COALESCE(NULLIF(c.display_name, ''), c.username) AS client,
                 c.wallet_network, c.wallet_token, c.wallet_address, c.wallet_updated_at,
                 SUM(l.status = 'paid') AS paid, SUM(l.status IN ('claimed', 'checking')) AS holding,
                 SUM(l.status IN ('superseded', 'refresh')) AS void,

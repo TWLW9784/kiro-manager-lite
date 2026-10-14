@@ -41,18 +41,26 @@ body {
 .sidebar .nav-close { display: none; margin-left: auto; }
 .nav { flex: 1 1 auto; border-right: none; overflow-y: auto; }
 .nav .el-menu-item { height: 42px; line-height: 42px; }
-.nav-badge { margin-left: auto; }
+/* 徽标会继承菜单项 42px 的行高，数字落在 42px 行框的基线上，比文字低 12px。
+   行高归 1 并用 flex 居中，数字就和菜单文字在同一条中线上 */
+.nav-badge { margin-left: auto; line-height: 1; display: inline-flex; align-items: center; }
 .sidebar-foot { padding: 12px; border-top: 1px solid var(--el-border-color-light); display: flex; flex-direction: column; gap: 10px; }
 .user { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .user-text { min-width: 0; }
 .user-text b { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .user-text span { font-size: 11px; color: var(--el-text-color-secondary); }
 .foot-actions { display: flex; gap: 8px; }
-.foot-actions .lang { width: 96px; }
 
+/* 内容区最大宽度：门户 1400；后台表格列多，放宽到 1600（见 .shell.wide）。
+   超出部分两边平均留白，不再全部堆在右边 */
+.shell { --content-max: 1400px; }
+.shell.wide { --content-max: 1600px; }
 .main { min-width: 0; display: flex; flex-direction: column; }
+/* 顶栏左右内边距跟内容区的留白同步：内容居中以后，标题和右上角按钮
+   仍然和下面卡片的左右边缘对齐，而不是一个贴边、一个缩在中间 */
 .topbar {
-  display: flex; align-items: center; gap: 12px; padding: 12px 24px;
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px max(24px, calc((100% - var(--content-max)) / 2 + 24px));
   border-bottom: 1px solid var(--el-border-color-light); background: var(--el-bg-color);
   position: sticky; top: 0; z-index: 2;
 }
@@ -62,7 +70,10 @@ body {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .topbar .nav-toggle { display: none; }
-.content { padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px; max-width: 1400px; width: 100%; }
+.content {
+  padding: 20px 24px 40px; display: flex; flex-direction: column; gap: 16px;
+  max-width: var(--content-max); width: 100%; margin-inline: auto;
+}
 
 /* ---------- 统计卡 ---------- */
 /* 165 而不是原来的 190：侧栏出现时会吃掉 232px，内容区反而变窄，
@@ -79,6 +90,9 @@ body {
 /* ---------- 卡片内的工具条 ---------- */
 .card-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .card-head h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1 1 auto; }
+/* 标题后面的条数（「批次 3」「链接明细 147」）：模板里只靠一个空格隔开，
+   12px 下几乎看不出，像「我的批次4」连在一起。给个明确的间距，数字也别加粗 */
+.card-head h2 > .muted { margin-left: 6px; font-weight: 400; }
 .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
 /* 筛选控件的基准宽度。统一放这里（各视图原来各自重复定义一遍 .w-200 之类），
    选择器带上容器是为了压过 Element Plus 的 .el-select{width:100%} —— 它的样式
@@ -110,7 +124,8 @@ body {
   .shell.nav-open .sidebar { transform: none; box-shadow: var(--el-box-shadow-dark); }
   .nav-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 2000; }
   .sidebar .nav-close, .topbar .nav-toggle { display: inline-flex; }
-  .topbar { padding: 10px 14px; }
+  /* 左右 12px，和下面 .content 的内边距一致，标题和卡片左边缘对齐 */
+  .topbar { padding: 10px 12px; }
   .content { padding: 14px 12px 32px; gap: 12px; }
   .stats { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
   .stat-value { font-size: 20px; }
@@ -144,4 +159,33 @@ body {
 @media (max-width: 480px) {
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .stats > :last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+/* ---------- 统计卡按固定张数排版 ----------
+   auto-fit 只管「一行能塞几张」，不管最后一行剩几张：后台 8 张卡在 1920 宽时
+   排成 7+1，第 8 张孤零零一行，高度还和上面不一样。卡片数固定的地方改成
+   只允许整齐的分法。断点按实际内容宽度算（侧栏 232 + 左右内边距 48），
+   每张卡至少留 ~175px，副标题不至于挤成三行。 */
+
+/* 后台总览 8 张：8 / 4+4 / 2+2+2+2 */
+.stats.cols-8 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+@media (min-width: 1720px) { .stats.cols-8 { grid-template-columns: repeat(8, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .stats.cols-8 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stats.cols-8 > :nth-child(n) { grid-column: auto; }
+
+/* 门户工作台 5 张：5 / 2+3（数量一行、金额一行）/ 2+2+1。
+   用 6 列栅格：前两张各占 3 列，后三张各占 2 列 */
+.stats.cols-5 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.stats.cols-5 > :nth-child(n) { grid-column: span 2; }
+.stats.cols-5 > :nth-child(-n + 2) { grid-column: span 3; }
+/* 放得下就一行 5 张：有侧栏时内容区 ≥860 才够（视口 ≥1142），
+   没侧栏时（≤1080）视口 ≥884 就够 */
+@media (min-width: 1142px), (min-width: 884px) and (max-width: 1080px) {
+  .stats.cols-5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+  .stats.cols-5 > :nth-child(n) { grid-column: auto; }
+}
+@media (max-width: 524px) {
+  .stats.cols-5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stats.cols-5 > :nth-child(n) { grid-column: auto; }
+  .stats.cols-5 > :last-child { grid-column: 1 / -1; }
 }

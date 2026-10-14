@@ -63,7 +63,7 @@ export interface AdminOrder {
 export interface Overview {
   now: string
   by_status: { status: string; tier: string; n: string; usd: string | null; cny: string | null }[]
-  daily: { day: string; client: string; n: string; usd: string | null; cny: string | null }[]
+  daily: { day: string; client_id: number | null; client: string; n: string; usd: string | null; cny: string | null }[]
   last_stripe_check: string | null
   desktop: { at: string; version: string; last_summary: string; last_error: string } | null
   stuck_checking: number
