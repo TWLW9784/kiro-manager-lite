@@ -11,6 +11,7 @@ if (PHP_SAPI !== 'cli') {
     exit;
 }
 require __DIR__ . '/../inc/lib.php';
+require __DIR__ . '/../inc/settle.php'; // 只有函数定义；补打款记录后要用 recompute_order_settle
 
 $pdo = db();
 
@@ -120,6 +121,29 @@ $def = $pdo->query(
 if ((int) $def !== 1440) {
     $pdo->exec('ALTER TABLE clients MODIFY claim_timeout_minutes INT UNSIGNED NOT NULL DEFAULT 1440');
     echo "clients.claim_timeout_minutes default {$def} -> 1440\n";
+}
+
+// 旧版「手动改结算状态」留下的已结金额 → 补成打款记录。
+// 以前记一笔打款必须带交易哈希或凭证，管理员就直接在批次里改「已结金额」，
+// 结果钱记了、打款流水里却没有。后台改版后已结金额只由打款记录累加，
+// 这里把差额补成一笔，金额不变；created_by = 'migrate' 方便日后辨认。
+// 可重复执行：补过的批次差额已经是 0，不会再补。
+$gaps = $pdo->query(
+    "SELECT o.id, o.client_id, o.code, o.settled_amount, o.settled_at, o.updated_at,
+            COALESCE((SELECT SUM(s.amount) FROM settlements s WHERE s.order_id = o.id), 0) AS ledger
+     FROM orders o
+     WHERE o.settled_amount > COALESCE((SELECT SUM(s.amount) FROM settlements s WHERE s.order_id = o.id), 0) + 0.005"
+)->fetchAll();
+foreach ($gaps as $g) {
+    $diff = round((float) $g['settled_amount'] - (float) $g['ledger'], 2);
+    $at = $g['settled_at'] ?: $g['updated_at'];
+    $pdo->prepare(
+        "INSERT INTO settlements (client_id, order_id, amount, token, network, to_address, tx_hash, proof_file, proof_mime, note, created_by, paid_at, created_at)
+         VALUES (?, ?, ?, 'USDT', 'polygon', '', '', '', '', '旧版手动结算转入', 'migrate', ?, ?)"
+    )->execute([$g['client_id'], $g['id'], $diff, $at, now()]);
+    // 按打款记录重算已结金额和结算状态（金额不变，状态会和金额对上）
+    recompute_order_settle((int) $g['id']);
+    echo "settlement backfilled: {$g['code']} +{$diff}\n";
 }
 
 echo "migrate ok\n";
