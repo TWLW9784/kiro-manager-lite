@@ -34,19 +34,23 @@ async function planFor(tier: string, probeId: string): Promise<PlanTarget | null
   return plan ? { subscriptionType: plan.subscriptionType, title: plan.title, amount: plan.amount, currency: plan.currency } : null
 }
 
-/** 可以拿来提取的 Free 号，新导入的在前 */
+/**
+ * 可以拿来提取的 Free 号。
+ * 链接失效又没付的排最前：这些号上次提取时已经验过有新用户优惠，重新提取基本都能成；
+ * 没提取过的号还不知道有没有优惠，放后面。同一组里新导入的在前。
+ */
 function candidates(maxLimits: Record<string, number>): Account[] {
   const store = useAccountsStore()
   const now = Date.now()
-  return store.accounts
-    .filter((a) => {
-      if (a.subscription.type !== 'Free') return false
-      if (a.discountCheck || shouldSkipAccountUsageRefresh(a)) return false
-      if ((maxLimits[a.id] ?? a.usage.limit ?? 0) > FREE_LIMIT) return false
-      const state = paymentLinkState(a, now)
-      return state === 'none' || state === 'expired'
-    })
-    .sort((x, y) => (y.createdAt || 0) - (x.createdAt || 0))
+  const pool = store.accounts.filter((a) => {
+    if (a.subscription.type !== 'Free') return false
+    if (a.discountCheck || shouldSkipAccountUsageRefresh(a)) return false
+    if ((maxLimits[a.id] ?? a.usage.limit ?? 0) > FREE_LIMIT) return false
+    const state = paymentLinkState(a, now)
+    return state === 'none' || state === 'expired'
+  })
+  const rank = (a: Account): number => (paymentLinkState(a, now) === 'expired' ? 0 : 1)
+  return pool.sort((x, y) => rank(x) - rank(y) || (y.createdAt || 0) - (x.createdAt || 0))
 }
 
 /** 正在补的，避免两轮同时跑 */

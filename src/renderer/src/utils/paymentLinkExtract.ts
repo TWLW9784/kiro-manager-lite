@@ -1,6 +1,7 @@
 // 单个账号提取支付链接：批量提取与「重新提取」共用同一套流程与优惠判定
 import { useAccountsStore } from '@/stores/accounts'
 import { errorMessage } from '@shared/errors'
+import { isPaidSubscription } from '@shared/paymentLink'
 import type { AccountPaymentLink, CheckoutPrice, SubscriptionPlan } from '@shared/types'
 import { formatLocal, formatUsd, subscriptionLabel } from './format'
 import { toPlain } from './ipc'
@@ -203,6 +204,16 @@ export interface ExtractResult {
 }
 
 /**
+ * 正在提取的账号。同一账号生成新链接会让上一条立刻失效，所以同一时间只许一处在提取。
+ * 四个入口（批量提取、提取记录里的重新提取、网站同步换新、自动补货）都走 extractPaymentLink，
+ * 锁放在这里就全覆盖；以前各入口只有自己的「正在运行」标记，互相不知道。
+ */
+const extracting = new Set<string>()
+
+/** Stripe 说这条会话已经付不了（付完、过期、被新链接顶掉都是这句） */
+const INACTIVE_RE = /no longer active|not active|inactive/i
+
+/**
  * 为一个账号生成结算链接、读实付金额、按规则决定保存还是丢弃。
  * 结果直接写回 store：满足条件记 paymentLink，读到金额但不满足记 discountCheck。
  */
@@ -211,6 +222,16 @@ export async function extractPaymentLink(
   target: PlanTarget,
   setting: DiscountSetting
 ): Promise<ExtractResult> {
+  if (extracting.has(id)) return { state: 'skip', error: '这个账号正在别处提取，跳过，免得把那边刚生成的链接顶掉' }
+  extracting.add(id)
+  try {
+    return await extractOnce(id, target, setting)
+  } finally {
+    extracting.delete(id)
+  }
+}
+
+async function extractOnce(id: string, target: PlanTarget, setting: DiscountSetting): Promise<ExtractResult> {
   const accountsStore = useAccountsStore()
   try {
     const account = await accountsStore.freshAccount(id)
@@ -230,6 +251,19 @@ export async function extractPaymentLink(
 
     const reason = rejectReason(price, setting)
     if (reason) {
+      /*
+       * 刚生成的链接就「已经付不了」：最常见的是这个号其实已经付过款、Kiro 还没把档位改过来，
+       * 于是把那条付完的旧会话原样又给了一遍。刷一次 Kiro 档位看看：
+       * 已经是付费档 → 按已付处理（跳过，不再反复提取）；还是 Free → 多半是被同时生成的新链接顶掉，下一轮重试。
+       */
+      if (!price && INACTIVE_RE.test(priceError || '')) {
+        await accountsStore.checkStatus(id).catch(() => undefined)
+        const fresh = accountsStore.get(id)
+        if (fresh && isPaidSubscription(fresh.subscription.type)) {
+          return { state: 'skip', error: `链接已付不了：这个号已经开通 ${subscriptionLabel(fresh.subscription)}，按已付款处理` }
+        }
+        return { state: 'fail', error: 'Kiro 给的链接一生成就已失效（可能刚被同一账号的新链接顶掉），下一轮重试' }
+      }
       // 读到了金额却不满足条件才记「无优惠」；没读到属于临时故障，留着下次重试
       if (!price) return { state: 'fail', priceText, error: `${reason}：${priceError || '未知原因'}` }
       accountsStore.setDiscountCheck(id, {
