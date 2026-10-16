@@ -1,6 +1,6 @@
 <script setup lang="ts">
 /** 付款工作台：打开就能看到待付款链接，能领的批次直接在上面领 */
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import PaylinkUrl from '@site/shared/PaylinkUrl.vue'
@@ -8,7 +8,7 @@ import { api, guard } from '@site/shared/api'
 import { copyText, cny, num, usd } from '@site/shared/format'
 import { useViewport } from '@site/shared/responsive'
 import { tt, t, lang } from '../i18n'
-import { claimRule, guideDismissed, loadMe, me, walletIssue } from '../state'
+import { claimRule, guideDismissed, loadMe, me, tick, walletIssue } from '../state'
 import OrderDrawer from '../components/OrderDrawer.vue'
 import QuickStart from '../components/QuickStart.vue'
 
@@ -26,6 +26,8 @@ interface PendingLink {
   order_id: number | null
   code: string | null
   source: string | null
+  /** 这个批次还能更换几次；用完就不显示「更换」 */
+  replace_left?: number | string | null
 }
 interface Order {
   id: number
@@ -90,8 +92,16 @@ const hasActivity = computed(() => {
 const claimable = computed(() => openOrders.value.filter((o) => num(o.remaining) > 0))
 const maxClaim = computed(() => me.value?.max_claim ?? 50)
 
-async function load(): Promise<void> {
-  loading.value = true
+/** 默认领几条：一次领太多付不完，24 小时后会被收回、白占名额 */
+const DEFAULT_CLAIM = 10
+
+/**
+ * silent：自动刷新用。不转圈、不清勾选——已勾选的链接只要还在列表里（还没付、没被收回），
+ * 刷新后照样勾着。
+ */
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
+  const keepIds = new Set(selected.value.map((r) => r.id))
   try {
     const [orders, claimed] = await Promise.all([
       api.get<{ orders: Order[] }>('my_orders', { page: 1, page_size: 50, status: 'open' }),
@@ -104,11 +114,14 @@ async function load(): Promise<void> {
     openOrders.value = orders.orders
     rows.value = claimed.links
     total.value = claimed.total
-    for (const o of claimable.value) claimCount.value[o.id] ??= Math.min(num(o.remaining), maxClaim.value)
-    // 领到的自动勾上
-    if (fresh.value.size) {
-      const keep = rows.value.filter((r) => fresh.value.has(r.id))
-      for (const r of keep) tableRef.value?.toggleRowSelection(r, true)
+    for (const o of claimable.value) claimCount.value[o.id] ??= Math.min(num(o.remaining), DEFAULT_CLAIM, maxClaim.value)
+    // 换了新数组，表格的勾选会被清掉：按 id 重新勾回去；刚领到的也自动勾上
+    await nextTick()
+    const want = rows.value.filter((r) => r.status === 'claimed' && (keepIds.has(r.id) || fresh.value.has(r.id)))
+    selected.value = want
+    if (tableRef.value) {
+      tableRef.value.clearSelection()
+      for (const r of want) tableRef.value.toggleRowSelection(r, true)
     }
   } finally {
     loading.value = false
@@ -116,9 +129,24 @@ async function load(): Promise<void> {
 }
 
 onMounted(() => void guard(load))
+// 自动刷新：原地拉数据，不重建页面
+watch(tick, () => void guard(() => load(true)))
+
+/** 正在领取的批次：按钮转圈、不能连点（连点会被 3 秒限流挡下，弹「操作太快了」吓人） */
+const claiming = ref<number | null>(null)
 
 async function claim(order: Order): Promise<void> {
+  if (claiming.value !== null) return
   const n = Math.max(1, Math.min(num(claimCount.value[order.id]), maxClaim.value))
+  claiming.value = order.id
+  try {
+    await claimOnce(order, n)
+  } finally {
+    claiming.value = null
+  }
+}
+
+async function claimOnce(order: Order, n: number): Promise<void> {
   await guard(async () => {
     const r = await api.post<{ claimed: number; short: number; ids: number[] }>('claim', {
       order_id: order.id,
@@ -132,6 +160,8 @@ async function claim(order: Order): Promise<void> {
     page.value = 1
     orderFilter.value = ALL
     await Promise.all([loadMe(), load()])
+    // 手机上领取区在上、链接在下：领到了就滚到待付款列表，客户一眼看到
+    if (r.claimed) document.getElementById('pending-card')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   })
 }
 
@@ -214,6 +244,9 @@ function left(sec: number): string {
   if (h >= 24) return t('left_d', { d: Math.floor(h / 24), h: h % 24 })
   return h ? t('left_hm', { h, m }) : t('left_m', { m })
 }
+/** 能不能更换：还是待付、属于网站派的批次、批次的更换次数没用完 */
+const canReplace = (r: PendingLink): boolean =>
+  r.status === 'claimed' && !!r.order_id && r.source !== 'offline' && num(r.replace_left ?? 1) > 0
 const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row.id) ? 'fresh-row' : '')
 </script>
 
@@ -298,7 +331,14 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
         controls-position="right"
         class="claim-count"
       />
-      <el-button type="primary" @click="claim(o)">{{ tt('claim') }}</el-button>
+      <el-button
+        type="primary"
+        :loading="claiming === o.id"
+        :disabled="claiming !== null && claiming !== o.id"
+        @click="claim(o)"
+      >
+        {{ tt('claim') }}
+      </el-button>
     </div>
   </el-card>
   <el-alert
@@ -377,7 +417,7 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
             <span v-else :class="['small', row.expires_in < 3600 ? 'warn' : 'muted']">{{ left(row.expires_in) }}</span>
             <span class="grow"></span>
             <el-button
-              v-if="row.status === 'claimed' && row.order_id && row.source !== 'offline'"
+              v-if="canReplace(row)"
               size="small"
               text
               @click="replace(row)"
@@ -461,7 +501,7 @@ const rowClass = ({ row }: { row: PendingLink }): string => (fresh.value.has(row
             {{ row.status === 'checking' ? tt('view_link') : tt('open_pay') }}
           </el-button>
           <el-button
-            v-if="row.status === 'claimed' && row.order_id && row.source !== 'offline'"
+            v-if="canReplace(row)"
             size="small"
             text
             @click="replace(row)"

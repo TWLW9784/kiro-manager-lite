@@ -1,9 +1,11 @@
 <script setup lang="ts">
 /** 打款记录表（后台）：可删除，凭证新窗口打开 */
+import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete } from '@element-plus/icons-vue'
+import { Delete, Edit } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
-import { dt, num, short } from '@site/shared/format'
+import { dt, num, short, validTxHash } from '@site/shared/format'
+import { dialogTop, dialogWidth, useViewport } from '@site/shared/responsive'
 
 export interface Settlement {
   id: number
@@ -45,6 +47,43 @@ async function remove(s: Settlement): Promise<void> {
     ElMessage.success('已删除')
     emit('changed')
   })
+}
+
+// ---- 修改 ----
+const { width: vw } = useViewport()
+const boxWidth = computed(() => dialogWidth(vw.value, 480))
+const boxTop = computed(() => dialogTop(vw.value))
+const editOpen = ref(false)
+const saving = ref(false)
+const edit = ref({ id: 0, amount: 0 as number | undefined, tx_hash: '', paid_at: '', note: '' })
+
+function startEdit(s: Settlement): void {
+  // 打款时间按北京时间存、也按北京时间改（和「记一笔打款」一致），只取到分钟
+  edit.value = { id: s.id, amount: num(s.amount), tx_hash: s.tx_hash, paid_at: s.paid_at.slice(0, 16), note: s.note }
+  editOpen.value = true
+}
+
+async function saveEdit(): Promise<void> {
+  const e = edit.value
+  if (!(num(e.amount) > 0)) return void ElMessage.error('金额要大于 0')
+  if (e.tx_hash.trim() && !validTxHash(e.tx_hash.trim())) return void ElMessage.error('交易哈希格式不对')
+  saving.value = true
+  try {
+    await guard(async () => {
+      await api.admin('settlement_update', {
+        id: e.id,
+        amount: e.amount,
+        tx_hash: e.tx_hash.trim(),
+        paid_at: e.paid_at.trim(),
+        note: e.note.trim()
+      })
+      ElMessage.success('已修改')
+      editOpen.value = false
+      emit('changed')
+    })
+  } finally {
+    saving.value = false
+  }
 }
 </script>
 
@@ -107,13 +146,41 @@ async function remove(s: Settlement): Promise<void> {
     <el-table-column label="备注" min-width="110" show-overflow-tooltip>
       <template #default="{ row }"><span class="small">{{ row.note }}</span></template>
     </el-table-column>
-    <el-table-column width="56" align="right">
+    <el-table-column width="84" align="right">
       <template #default="{ row }">
-        <el-button text type="danger" size="small" :icon="Delete" @click="remove(row)" />
+        <el-button text size="small" :icon="Edit" aria-label="修改" @click="startEdit(row)" />
+        <el-button text type="danger" size="small" :icon="Delete" aria-label="删除" @click="remove(row)" />
       </template>
     </el-table-column>
     <template #empty>
       <el-empty description="还没有打款记录。打完款点「记一笔打款」记下来，交易哈希、截图都选填" />
     </template>
   </el-table>
+
+  <!-- 改一笔打款：写错了不用删掉重记，凭证也不用重新上传 -->
+  <el-dialog v-model="editOpen" title="修改打款记录" :width="boxWidth" :top="boxTop" append-to-body>
+    <el-form label-position="top">
+      <el-form-item label="金额（USD）">
+        <el-input-number v-model="edit.amount" :min="0.01" :precision="2" controls-position="right" class="full" />
+      </el-form-item>
+      <el-form-item label="交易哈希（选填）">
+        <el-input v-model="edit.tx_hash" class="mono-input" placeholder="0x…" spellcheck="false" />
+      </el-form-item>
+      <el-form-item label="打款时间（北京时间）">
+        <el-input v-model="edit.paid_at" placeholder="2026-10-16 15:30" />
+      </el-form-item>
+      <el-form-item label="备注">
+        <el-input v-model="edit.note" maxlength="255" />
+      </el-form-item>
+      <div class="muted small">凭证不能在这里换；要换的话删掉这条重记。改金额会重算所属批次的已结金额。</div>
+    </el-form>
+    <template #footer>
+      <el-button @click="editOpen = false">取消</el-button>
+      <el-button type="primary" :loading="saving" @click="saveEdit">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
+
+<style scoped>
+.full { width: 100%; }
+</style>

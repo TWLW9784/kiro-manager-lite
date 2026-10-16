@@ -7,7 +7,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, Edit, Link as LinkIcon, Plus, Refresh, SwitchButton } from '@element-plus/icons-vue'
 import { computed, ref } from 'vue'
 import { api, guard } from '@site/shared/api'
-import { copyText, num, short, usd, walletFresh } from '@site/shared/format'
+import { copyText, dt, num, short, usd, walletFresh } from '@site/shared/format'
 import { clients, loadClients, loadOverview, type AdminClient } from '../state'
 import ClientModal from '../components/ClientModal.vue'
 import ClientDrawer from '../components/ClientDrawer.vue'
@@ -128,7 +128,7 @@ function openOrder(id: number): void {
         </template>
       </el-table-column>
       <el-table-column label="最近登录" width="104">
-        <template #default="{ row }"><span class="small muted">{{ row.last_login_at?.slice(5, 16) ?? '-' }}</span></template>
+        <template #default="{ row }"><span class="small muted">{{ dt(row.last_login_at) }}</span></template>
       </el-table-column>
       <el-table-column min-width="230" align="right">
         <template #default="{ row }">

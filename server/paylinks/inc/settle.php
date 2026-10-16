@@ -92,6 +92,54 @@ function admin_settlement_delete(array $in): never
 }
 
 /**
+ * 改一笔打款记录：金额、交易哈希、打款时间、备注。凭证不在这里换（要换就删了重记）。
+ * 以前写错一个数只能删掉重记，凭证还得重新上传。改了金额会重算所属批次的已结金额。
+ */
+function admin_settlement_update(array $in): never
+{
+    $id = (int) ($in['id'] ?? 0);
+    $pdo = db();
+    $row = $pdo->prepare('SELECT order_id, network, amount, tx_hash, paid_at, note FROM settlements WHERE id = ?');
+    $row->execute([$id]);
+    $s = $row->fetch();
+    if (!$s) fail('打款记录不存在', 404);
+    $sets = [];
+    $args = [];
+    if (array_key_exists('amount', $in)) {
+        $amount = (float) $in['amount'];
+        if (!is_numeric($in['amount']) || $amount <= 0 || $amount > 1e7) fail('金额不对');
+        $sets[] = 'amount = ?';
+        $args[] = round($amount, 2);
+    }
+    if (array_key_exists('tx_hash', $in)) {
+        $tx = trim((string) $in['tx_hash']);
+        if ($tx !== '' && !valid_tx_hash((string) $s['network'], $tx)) fail('交易哈希格式不对');
+        $sets[] = 'tx_hash = ?';
+        $args[] = $tx;
+    }
+    if (array_key_exists('paid_at', $in)) {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/', (string) $in['paid_at'])) fail('打款时间格式不对');
+        $sets[] = 'paid_at = ?';
+        $args[] = str_replace('T', ' ', substr((string) $in['paid_at'], 0, 16)) . ':00';
+    }
+    if (array_key_exists('note', $in)) {
+        $sets[] = 'note = ?';
+        $args[] = clean_text($in['note'], 255, '备注');
+    }
+    if (!$sets) fail('没有要改的');
+    $args[] = $id;
+    $pdo->prepare('UPDATE settlements SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($args);
+    if ($s['order_id']) recompute_order_settle((int) $s['order_id']);
+    // 日志里留改之前的值，事后对账查得到
+    on_json_ok(static fn () => admin_log('settlement_update', [
+        'id' => $id,
+        'before' => ['amount' => $s['amount'], 'tx_hash' => $s['tx_hash'], 'paid_at' => $s['paid_at'], 'note' => $s['note']],
+        'after' => array_intersect_key($in, ['amount' => 1, 'tx_hash' => 1, 'paid_at' => 1, 'note' => 1]),
+    ]));
+    json_out(['ok' => true, 'id' => $id]);
+}
+
+/**
  * 记一笔结算（multipart/form-data）：client_id、order_id（可空）、amount、token、network、to_address、tx_hash、paid_at、note、proof（文件，可选）。
  * 收款地址默认用客户填的，这里存一份快照：之后客户改了地址，这笔记录上还是当时打的那个。
  */

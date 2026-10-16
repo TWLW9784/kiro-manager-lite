@@ -7,7 +7,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { Edit, Plus, Wallet } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
-import { ORDER_STATUS, copyText, num, usd, walletFresh } from '@site/shared/format'
+import { copyText, dt, num, ORDER_STATUS, usd, walletFresh } from '@site/shared/format'
 import { drawerSize, useViewport } from '@site/shared/responsive'
 import { ElMessage } from 'element-plus'
 import type { AdminClient, AdminOrder } from '../state'
@@ -115,7 +115,7 @@ const pct = (r: AdminOrder): number => Math.min(100, Math.round((num(r.paid) / M
           <el-table-column label="批次" min-width="130">
             <template #default="{ row }">
               <el-link type="primary" :underline="false">{{ row.code }}</el-link>
-              <div class="muted small">{{ row.tier }} · {{ row.created_at.slice(5, 10) }}</div>
+              <div class="muted small">{{ row.tier }} · {{ dt(row.created_at).slice(0, 5) }}</div>
             </template>
           </el-table-column>
           <el-table-column label="进度" min-width="150">

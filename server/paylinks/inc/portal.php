@@ -154,7 +154,8 @@ function action_my_claimed(): never
     $total = $pdo->prepare("SELECT COUNT(*) FROM links l WHERE $where");
     $total->execute($args);
     $stmt = $pdo->prepare(
-        "SELECT l.id, l.url, l.tier, l.amount_due, l.amount_cny, l.status, l.claimed_at, l.order_id, o.code, o.source
+        "SELECT l.id, l.url, l.tier, l.amount_due, l.amount_cny, l.status, l.claimed_at, l.order_id, o.code, o.source,
+                GREATEST(0, CAST(o.replace_limit AS SIGNED) - CAST(o.replaced AS SIGNED)) AS replace_left
          FROM links l LEFT JOIN orders o ON o.id = l.order_id
          WHERE $where ORDER BY l.claimed_at DESC, l.id LIMIT $size OFFSET $offset"
     );
@@ -270,12 +271,12 @@ function action_proof(): never
     $stmt = db()->prepare('SELECT client_id, proof_file, proof_mime FROM settlements WHERE id = ?');
     $stmt->execute([$id]);
     $row = $stmt->fetch();
-    if (!$row || $row['proof_file'] === '') fail('凭证不存在', 404);
+    if (!$row || $row['proof_file'] === '') fail('凭证不存在', 404, 'proof_not_found');
     $bearer = preg_match('/^Bearer\s+(.+)$/i', (string) ($_SERVER['HTTP_AUTHORIZATION'] ?? ''), $m) ? trim($m[1]) : '';
     $desktop = $bearer !== '' && (string) (config()['sync_token'] ?? '') !== '' && hash_equals((string) config()['sync_token'], $bearer);
     if (!$desktop && !admin_session_ok()) {
         $client = current_client();
-        if (!$client || (int) $client['id'] !== (int) $row['client_id']) fail('凭证不存在', 404);
+        if (!$client || (int) $client['id'] !== (int) $row['client_id']) fail('凭证不存在', 404, 'proof_not_found');
     }
     send_proof((string) $row['proof_file'], (string) $row['proof_mime']);
 }

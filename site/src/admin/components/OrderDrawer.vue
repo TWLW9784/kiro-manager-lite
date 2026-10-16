@@ -146,6 +146,18 @@ const cancel = (): Promise<void> =>
     await reload()
   })
 
+const reopen = (): Promise<void> =>
+  confirmThen(
+    `重新打开批次 ${order.value!.code}`,
+    '打开后客户又能继续领取。取消时收回的链接已经作废换新了，不会回来，客户重新领就行。',
+    async () => {
+      await api.admin('order_update', { id: props.orderId, status: 'open' })
+      ElMessage.success('已重新打开')
+      await reload()
+    },
+    false
+  )
+
 async function changeQty(): Promise<void> {
   const min = Math.max(1, num(order.value?.paid) + num(order.value?.holding))
   if (!qty.value || qty.value < min) return void ElMessage.error(`目标付款数不能少于已付 + 待付（${min}）`)
@@ -332,6 +344,14 @@ async function copyUnpaid(): Promise<void> {
             <el-input-number v-model="qty" :min="1" :max="1000" :placeholder="`目标 ${order.quantity}`" class="qty" />
             <el-button :disabled="!qty" @click="changeQty">改目标付款数</el-button>
             <el-button type="danger" plain @click="cancel">取消批次</el-button>
+          </div>
+        </el-card>
+        <!-- 取消 / 完成点错了能恢复 -->
+        <el-card v-else shadow="never">
+          <template #header><h2 class="head">批次操作</h2></template>
+          <div class="actions">
+            <el-button @click="reopen">重新打开批次</el-button>
+            <span class="muted small">打开后客户又能继续领；已经付满数量的不能打开</span>
           </div>
         </el-card>
       </template>

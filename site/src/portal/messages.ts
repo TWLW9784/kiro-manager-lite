@@ -188,6 +188,7 @@ export const MESSAGES = {
     err_bad_network: "不支持这个网络",
     err_bad_token: "不支持这个币种",
     err_bad_address: "地址格式不对，请核对网络与地址",
+    err_proof_not_found: "凭证不存在或已删除",
     // ---- 语言切换 / 使用说明 ----
     language: "语言",
     help: "使用说明",
@@ -404,6 +405,7 @@ export const MESSAGES = {
     err_bad_network: "Network not supported",
     err_bad_token: "Token not supported",
     err_bad_address: "Invalid address for this network",
+    err_proof_not_found: "Proof not found or deleted",
     // ---- language switch / help ----
     language: "Language",
     help: "Help",
@@ -620,6 +622,7 @@ export const MESSAGES = {
     err_bad_network: "Bu tarmoq qo'llab-quvvatlanmaydi",
     err_bad_token: "Bu token qo'llab-quvvatlanmaydi",
     err_bad_address: "Bu tarmoq uchun manzil noto'g'ri",
+    err_proof_not_found: "Tasdiq topilmadi yoki o'chirilgan",
     // ---- til / yo'riqnoma ----
     language: "Til",
     help: "Yo'riqnoma",

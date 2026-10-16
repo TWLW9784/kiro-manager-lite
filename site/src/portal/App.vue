@@ -8,7 +8,7 @@ import en from 'element-plus/es/locale/lang/en'
 import uzUz from 'element-plus/es/locale/lang/uz-uz'
 import { guard } from '@site/shared/api'
 import { lang, tt } from './i18n'
-import { helpOpen, loadMe, me } from './state'
+import { helpOpen, loadMe, me, tick } from './state'
 import LangSwitch from './components/LangSwitch.vue'
 import HelpDialog from './components/HelpDialog.vue'
 import WorkView from './views/WorkView.vue'
@@ -16,6 +16,7 @@ import OrdersView from './views/OrdersView.vue'
 import PaidView from './views/PaidView.vue'
 import SettlementsView from './views/SettlementsView.vue'
 import WalletView from './views/WalletView.vue'
+import { hm } from '@site/shared/format'
 
 const VIEWS = ['work', 'orders', 'paid', 'settlements', 'wallet'] as const
 type View = (typeof VIEWS)[number]
@@ -51,17 +52,27 @@ async function logout(): Promise<void> {
 
 /** 工作台与批次每 10 秒刷一次；弹窗 / 抽屉开着时不刷 */
 let timer: ReturnType<typeof setInterval> | undefined
+/** 原地刷新：只重新拉数据，不重建页面（勾选、页码、筛选都保留） */
+function refresh(): void {
+  if (document.hidden) return
+  if (document.querySelector('.el-overlay, .el-drawer__wrapper')) return
+  if (document.activeElement?.matches?.('input, textarea, select')) return
+  void guard(loadMe)
+  tick.value += 1
+}
+// 付完款切回这个页面时马上刷新，不用等下一个 10 秒
+const onVisible = (): void => {
+  if (!document.hidden) refresh()
+}
 onMounted(() => {
   void guard(loadMe)
-  timer = setInterval(() => {
-    if (document.hidden) return
-    if (document.querySelector('.el-overlay, .el-drawer__wrapper')) return
-    if (document.activeElement?.matches?.('input, textarea, select')) return
-    void guard(loadMe)
-    if (view.value === 'work' || view.value === 'orders') reloadKey.value += 1
-  }, 10000)
+  timer = setInterval(refresh, 10000)
+  document.addEventListener('visibilitychange', onVisible)
 })
-onUnmounted(() => clearInterval(timer))
+onUnmounted(() => {
+  clearInterval(timer)
+  document.removeEventListener('visibilitychange', onVisible)
+})
 
 const initial = computed(() => (me.value?.client.display_name || me.value?.client.username || '-').slice(0, 1).toUpperCase())
 </script>
@@ -106,7 +117,7 @@ const initial = computed(() => (me.value?.client.display_name || me.value?.clien
           <el-avatar :size="30">{{ initial }}</el-avatar>
           <div class="user-text">
             <b>{{ me?.client.display_name || me?.client.username }}</b>
-            <span>{{ me ? tt('updated_at', { time: me.now.slice(11, 16) }) : '' }}</span>
+            <span>{{ me ? tt('updated_at', { time: hm(me.now) }) : '' }}</span>
           </div>
         </div>
         <!-- 语言切换挪到了右上角：手机上侧栏是收起的，放这里要先打开菜单才找得到 -->

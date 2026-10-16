@@ -5,7 +5,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh } from '@element-plus/icons-vue'
 import PaylinkUrl from '@site/shared/PaylinkUrl.vue'
 import { api, guard } from '@site/shared/api'
-import { LINK_STATUS, cny, copyText, dt, num, usd } from '@site/shared/format'
+import { LINK_STATUS, TIERS, cny, copyText, dt, num, usd } from '@site/shared/format'
 import { FILTER_EMPTY, clientOptions } from '../state'
 
 const props = defineProps<{ clientId?: number; status?: string }>()
@@ -30,7 +30,6 @@ const REASON: Record<string, string> = {
   revoked: '管理收回',
   replaced: '客户更换'
 }
-const TIERS = ['pro', 'pro+', 'promax', 'power']
 
 const rows = ref<Link[]>([])
 const total = ref(0)

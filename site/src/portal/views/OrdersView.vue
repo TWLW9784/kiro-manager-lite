@@ -1,9 +1,10 @@
 <script setup lang="ts">
 /** 我的批次：按状态 / 结算状态筛，点一行看详情 */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { tick } from '../state'
 import { Refresh } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
-import { ORDER_STATUS, SETTLE_STATUS, num, usd } from '@site/shared/format'
+import { dt, num, ORDER_STATUS, SETTLE_STATUS, usd } from '@site/shared/format'
 import { useViewport } from '@site/shared/responsive'
 import { tt } from '../i18n'
 import OrderDrawer from '../components/OrderDrawer.vue'
@@ -42,8 +43,9 @@ const compact = computed(() => vw.value <= 860)
 const loading = ref(false)
 const drawerOrder = ref<number | null>(null)
 
-async function load(): Promise<void> {
-  loading.value = true
+/** silent：自动刷新用，不转圈 */
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     const r = await api.get<{ orders: Order[]; total: number }>('my_orders', {
       page: page.value,
@@ -58,6 +60,8 @@ async function load(): Promise<void> {
   }
 }
 onMounted(() => void guard(load))
+// 自动刷新：原地拉数据，不重建页面（筛选、页码、打开的详情都保留）
+watch(tick, () => void guard(() => load(true)))
 const reload = (): void => void guard(load)
 const refilter = (): void => {
   page.value = 1
@@ -139,7 +143,7 @@ const refilter = (): void => {
         </template>
       </el-table-column>
       <el-table-column v-if="!compact" :label="tt('col_created')" width="110">
-        <template #default="{ row }"><span class="small muted">{{ row.created_at.slice(5, 16) }}</span></template>
+        <template #default="{ row }"><span class="small muted">{{ dt(row.created_at) }}</span></template>
       </el-table-column>
       <el-table-column width="80" align="right">
         <template #default><el-button size="small" text type="primary">{{ tt('details') }}</el-button></template>

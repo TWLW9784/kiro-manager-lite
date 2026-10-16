@@ -33,6 +33,16 @@ async function request(url: string, init: RequestInit = {}): Promise<Record<stri
     throw new ApiError('login required', 'login_required')
   }
   const data = (await res.json().catch(() => ({ ok: false }))) as Record<string, any>
+  // 页面过期（CSRF 对不上，比如在另一个标签页重新登录过）：和 401 一样直接刷新拿新令牌，
+  // 别让人自己去刷。10 秒内只自动刷一次，万一服务器一直拒绝也不会刷个没完
+  if (res.status === 403 && data.code === 'csrf') {
+    const last = Number(sessionStorage.getItem('pl.csrfReload') || 0)
+    if (Date.now() - last > 10_000) {
+      sessionStorage.setItem('pl.csrfReload', String(Date.now()))
+      location.reload()
+      throw new ApiError('page expired', 'csrf')
+    }
+  }
   if (!data.ok) {
     const code = String(data.code ?? '')
     throw new ApiError(translateError(code, String(data.error ?? '请求失败')), code)

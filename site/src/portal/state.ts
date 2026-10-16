@@ -42,6 +42,13 @@ export const me = ref<Me | null>(null)
 export const helpOpen = ref(false)
 
 /**
+ * 自动刷新的节拍。各视图监听它、原地重新拉数据。
+ * 以前是改组件的 key 让整个工作台销毁重建，勾选的链接、页码、筛选、
+ * 领取框里填的数量每 10 秒全被清空。
+ */
+export const tick = ref(0)
+
+/**
  * 新手提示是否已关闭。按账号记在本机：同一台电脑换个客户账号登录，
  * 新账号还能看到。
  */

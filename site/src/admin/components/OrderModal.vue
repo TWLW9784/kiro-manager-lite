@@ -8,9 +8,9 @@ import { computed, ref, watch } from 'vue'
 import { ElMessage, type FormInstance, type FormRules, type UploadFile, type UploadRawFile } from 'element-plus'
 import { Paperclip } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
-import { num, usd, validTxHash, walletFresh } from '@site/shared/format'
+import { TIERS, num, usd, validTxHash, walletFresh } from '@site/shared/format'
 import { dialogTop, dialogWidth, useViewport } from '@site/shared/responsive'
-import { clients } from '../state'
+import { clients, overview } from '../state'
 
 const props = defineProps<{ clientId?: number }>()
 const emit = defineEmits<{ close: []; saved: [] }>()
@@ -19,7 +19,13 @@ const { width: vw } = useViewport()
 const boxWidth = computed(() => dialogWidth(vw.value, 560))
 const boxTop = computed(() => dialogTop(vw.value))
 
-const TIERS = ['pro', 'pro+', 'promax', 'power']
+/** 池子里每个档位现在有几条可领的；派单时看得到，不用派完才发现缺货 */
+const available = computed(() => {
+  const out: Record<string, number> = {}
+  for (const r of overview.value?.by_status ?? []) if (r.status === 'available') out[r.tier] = (out[r.tier] ?? 0) + num(r.n)
+  return out
+})
+const short = computed(() => Math.max(0, form.value.quantity - (available.value[form.value.tier] ?? 0)))
 const formRef = ref<FormInstance>()
 const saving = ref(false)
 const form = ref({
@@ -168,11 +174,12 @@ async function submit(): Promise<void> {
       <div class="two">
         <el-form-item label="档位">
           <el-select v-model="form.tier">
-            <el-option v-for="t in TIERS" :key="t" :value="t" :label="t" />
+            <el-option v-for="t in TIERS" :key="t" :value="t" :label="`${t}（池子里 ${available[t] ?? 0} 条）`" />
           </el-select>
         </el-form-item>
         <el-form-item label="数量（要完成几个）" prop="quantity">
           <el-input-number v-model="form.quantity" :min="1" :max="500" controls-position="right" class="full" />
+          <div v-if="short" class="hint warn">池子里少 {{ short }} 条，开着的桌面端会自动提取补上</div>
         </el-form-item>
       </div>
       <el-form-item label="每个多少钱（USD）">

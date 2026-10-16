@@ -6,7 +6,7 @@ page_headers();
 $authed = admin_session_ok();
 $csrf = $authed ? ($_SESSION['admin_csrf'] ?? '') : '';
 $admin = (string) ($_SESSION['admin'] ?? 'admin');
-$v = '50';
+$v = '51';
 ?><!doctype html>
 <html lang="zh-CN">
 <head>

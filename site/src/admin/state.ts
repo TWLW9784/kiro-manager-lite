@@ -79,6 +79,8 @@ export interface Overview {
 
 export const clients = ref<AdminClient[]>([])
 export const overview = ref<Overview | null>(null)
+/** 自动刷新节拍：批次页等视图监听它、原地重新拉数据（以前只刷总览，批次页开着不会更新） */
+export const tick = ref(0)
 
 export async function loadClients(): Promise<void> {
   clients.value = (await api.admin<{ clients: AdminClient[] }>('clients')).clients

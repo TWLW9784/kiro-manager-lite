@@ -30,6 +30,8 @@ function action_admin(): never
     if (in_array($op, ADMIN_LOGGED_OPS, true)) {
         $detail = $in;
         unset($detail['op']);
+        // 改客户密码时 password 是明文：日志里只记「改了密码」，不记密码本身
+        if (array_key_exists('password', $detail)) $detail['password'] = $detail['password'] === '' ? '' : '(已修改)';
         // 链接本身不进日志，只记条数
         if (isset($detail['links'])) $detail['links'] = count((array) $detail['links']);
         on_json_ok(static fn (array $out) => admin_log($op, $detail + array_intersect_key($out, ['id' => 1, 'code' => 1, 'revoked' => 1, 'resolved' => 1])));
@@ -48,6 +50,7 @@ function action_admin(): never
         'order_settle' => admin_order_settle($in),
         'settlements' => admin_settlements($in),
         'settlement_delete' => admin_settlement_delete($in),
+        'settlement_update' => admin_settlement_update($in),
         'orders' => admin_orders($in),
         'order_create' => admin_order_create($in),
         'order_update' => admin_order_update($in),
@@ -546,6 +549,18 @@ function admin_order_update(array $in): never
     if (($in['status'] ?? '') === 'done') {
         $pdo->prepare("UPDATE orders SET status = 'done', done_at = COALESCE(done_at, ?), updated_at = ? WHERE id = ? AND status = 'open'")
             ->execute([$t, $t, $id]);
+        json_out(['ok' => true]);
+    }
+    // 重新打开：取消或手动完成点错了能恢复。已经付满数量的不能开（开了也会马上自动变回完成）。
+    // 取消时收回的链接已经作废换新，不会回来；客户重新领就是了
+    if (($in['status'] ?? '') === 'open') {
+        $o = $pdo->prepare("SELECT o.quantity, (SELECT COUNT(*) FROM links l WHERE l.order_id = o.id AND l.status = 'paid') AS paid
+                            FROM orders o WHERE o.id = ? AND o.status IN ('cancelled', 'done')");
+        $o->execute([$id]);
+        $row = $o->fetch();
+        if (!$row) fail('这个批次不是已取消 / 已完成，不用重新打开');
+        if ((int) $row['paid'] >= (int) $row['quantity']) fail('这个批次已经付满了，要多派请改目标数量或新派一个批次');
+        $pdo->prepare("UPDATE orders SET status = 'open', done_at = NULL, updated_at = ? WHERE id = ?")->execute([$t, $id]);
         json_out(['ok' => true]);
     }
     if (($in['status'] ?? '') === 'cancelled') {

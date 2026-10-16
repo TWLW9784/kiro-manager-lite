@@ -6,7 +6,7 @@ import { Close, DataLine, Document, Expand, Link, List, Sort, User } from '@elem
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { guard } from '@site/shared/api'
 import { num } from '@site/shared/format'
-import { clients, loadClients, loadOverview, overview } from './state'
+import { clients, loadClients, loadOverview, overview, tick } from './state'
 import OverviewView from './views/OverviewView.vue'
 import OrdersView from './views/OrdersView.vue'
 import SettlementsView from './views/SettlementsView.vue'
@@ -71,7 +71,10 @@ onMounted(() => {
   })
   timer = setInterval(() => {
     if (document.hidden || document.querySelector('.el-overlay, .el-drawer__wrapper')) return
-    void guard(loadOverview)
+    if (document.activeElement?.matches?.('input, textarea, select')) return
+    // 客户列表也一起刷：客户页的余额、侧栏「客户」上的红点都靠它
+    void guard(() => Promise.all([loadOverview(), loadClients()]))
+    tick.value += 1
   }, 15000)
 })
 onUnmounted(() => clearInterval(timer))

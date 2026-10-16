@@ -3,8 +3,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { Plus, Refresh } from '@element-plus/icons-vue'
 import { api, guard } from '@site/shared/api'
-import { ORDER_STATUS, SETTLE_STATUS, num, usd } from '@site/shared/format'
-import { FILTER_EMPTY, clientOptions, loadClients, loadOverview, type AdminOrder } from '../state'
+import { dt, num, ORDER_STATUS, SETTLE_STATUS, usd } from '@site/shared/format'
+import { FILTER_EMPTY, clientOptions, loadClients, loadOverview, tick, type AdminOrder } from '../state'
 import OrderDrawer from '../components/OrderDrawer.vue'
 import OrderModal from '../components/OrderModal.vue'
 
@@ -27,8 +27,9 @@ const filtered = computed(() => !!clientId.value || !!settle.value || !!q.value.
 /** 完成进度：已付 / 数量 */
 const pct = (r: AdminOrder): number => Math.min(100, Math.round((num(r.paid) / Math.max(1, r.quantity)) * 100))
 
-async function load(): Promise<void> {
-  loading.value = true
+/** silent：自动刷新用，不转圈 */
+async function load(silent = false): Promise<void> {
+  if (!silent) loading.value = true
   try {
     const r = await api.admin<{ orders: AdminOrder[]; total: number }>('orders', {
       page: page.value,
@@ -46,6 +47,8 @@ async function load(): Promise<void> {
 }
 onMounted(() => void guard(load))
 const reload = (): void => void guard(load)
+// 自动刷新：原地拉数据，筛选和页码都保留
+watch(tick, () => void guard(() => load(true)))
 const refilter = (): void => {
   page.value = 1
   reload()
@@ -136,7 +139,7 @@ async function changed(): Promise<void> {
         </template>
       </el-table-column>
       <el-table-column label="创建" width="104">
-        <template #default="{ row }"><span class="small muted">{{ row.created_at.slice(5, 16) }}</span></template>
+        <template #default="{ row }"><span class="small muted">{{ dt(row.created_at) }}</span></template>
       </el-table-column>
       <el-table-column width="72" align="right">
         <template #default><el-button size="small" text type="primary">详情</el-button></template>
