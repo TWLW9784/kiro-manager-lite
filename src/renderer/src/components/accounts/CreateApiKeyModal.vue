@@ -9,6 +9,7 @@ import { formatFullDateTime } from '@/utils/format'
 import { toPlain } from '@/utils/ipc'
 import { applyRefreshedCredentials, randomKeyName } from '@/utils/accountApiKey'
 import { confirmDanger, copyText } from '@/utils/ui'
+import { auditExport, keyBrief } from '@/utils/audit'
 import type { Account, AccountApiKeyItem, CreateApiKeyResult } from '@shared/types'
 
 const props = defineProps<{ account: Account }>()
@@ -127,6 +128,8 @@ function removeKey(record: AccountApiKeyItem): void {
 function copyFresh(): void {
   if (!freshKey.value) return
   copyText(freshKey.value.apiKey, '已复制完整 API Key')
+  const { apiKey, region } = freshKey.value
+  auditExport('复制新生成的 API Key', [{ email: props.account.email, key: apiKey, region }], { detail: keyBrief })
 }
 
 /** 关闭明文弹窗即丢弃完整 Key（顶部提示已说明只显示这一次） */

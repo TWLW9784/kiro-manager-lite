@@ -14,6 +14,7 @@ import {
   type ApiKeyExportFormat
 } from '@/utils/transfer'
 import { copyText } from '@/utils/ui'
+import { auditExport, keyBrief } from '@/utils/audit'
 
 /**
  * selectedIds 为列表当前勾选的 Key。
@@ -72,9 +73,16 @@ function close(): void {
   emit('update:open', false)
 }
 
+/** API Key 拿到就能用这个号的额度，和导出账号一样逐个记下来 */
+function logExport(how: string, to?: string): void {
+  const name = formats.value.find((item) => item.value === format.value)?.label ?? format.value
+  auditExport(`${how}（${name}）`, targets.value, { to, detail: keyBrief, unit: '个 API Key' })
+}
+
 function copy(): void {
   if (!targets.value.length) return void message.warning('没有可导出的 API Key')
   copyText(content(), `已复制 ${targets.value.length} 个 API Key 到剪贴板`)
+  logExport('复制 API Key')
   close()
 }
 
@@ -83,6 +91,7 @@ async function saveFile(): Promise<void> {
   const res = await window.api.exportToFile(content(), apiKeyExportFilename())
   if (!res.success) return void message.error(res.error || '导出失败')
   if (!res.data?.saved) return
+  logExport('导出 API Key', res.data.path)
   message.success(`已导出 ${targets.value.length} 个 API Key`)
   close()
 }

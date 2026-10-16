@@ -38,6 +38,7 @@ import { confirmDanger, copyText } from '@/utils/ui'
 import {
   buildPaymentLinkSheet,
   displayPaymentUrl,
+  paymentLinkBrief,
   paymentLinkFilename,
   paymentLinkText
 } from '@/utils/paymentLinks'
@@ -478,7 +479,9 @@ defineExpose({ abort })
 
 function copyRow(row: Row): void {
   const account = accountsStore.get(row.id)
-  if (account?.paymentLink) copyText(account.paymentLink.url, '支付链接已复制')
+  if (!account?.paymentLink) return
+  copyText(account.paymentLink.url, '支付链接已复制')
+  auditExport('复制支付链接（批量提取）', [account], { detail: paymentLinkBrief })
 }
 
 async function openRow(row: Row): Promise<void> {
@@ -491,6 +494,8 @@ function copyAll(): void {
   const list = extractedAccounts.value
   if (!list.length) return
   copyText(paymentLinkText(list), `已复制 ${list.length} 条支付链接`)
+  // 先记再标：记录里要的是标成「已发出」之前的状态（以前有没有发给过别人）
+  auditExport('复制支付链接（批量提取，全部）', list, { detail: paymentLinkBrief, unit: '条支付链接' })
   accountsStore.markPaymentLinksExported(list)
 }
 
@@ -507,9 +512,9 @@ async function exportXlsx(): Promise<void> {
     const res = await window.api.exportToXlsx(toPlain(sheet), paymentLinkFilename())
     if (!res.success) return void message.error(res.error || '导出失败')
     if (res.data?.saved) {
+      auditExport('导出支付链接 Excel（批量提取）', list, { to: res.data.path, detail: paymentLinkBrief, unit: '条支付链接' })
       // 发出去的链接不再推到网站（除非之后手动分配给客户）
       accountsStore.markPaymentLinksExported(list)
-      auditExport(`导出支付链接 Excel → ${res.data.path ?? ""}`, list.map((a) => a.email))
       message.success(`已导出 ${sheet.rows.length} 条支付链接`)
     }
   } finally {

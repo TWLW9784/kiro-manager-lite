@@ -10,6 +10,7 @@ import PaylinkUrl from '@/components/paylinks/PaylinkUrl.vue'
 import PaylinksSettleModal from '@/components/paylinks/PaylinksSettleModal.vue'
 import PaylinksSettlementTable from '@/components/paylinks/PaylinksSettlementTable.vue'
 import { confirmDanger, copyText } from '@/utils/ui'
+import { auditWebsiteLinks } from '@/utils/paylinksAssign'
 import {
   LINK_STATUS_META,
   ORDER_STATUS_META,
@@ -70,6 +71,12 @@ async function reload(): Promise<void> {
 const count = (s: string): number => links.value.filter((l) => l.status === s).length
 const shown = computed(() => (filter.value === 'all' ? links.value : links.value.filter((l) => l.status === filter.value)))
 const unpaid = computed(() => links.value.filter((l) => l.status === 'claimed'))
+
+function copyUnpaid(): void {
+  if (!unpaid.value.length) return
+  copyText(unpaid.value.map((l) => l.url).join('\n'), `已复制待付的 ${unpaid.value.length} 条`)
+  auditWebsiteLinks(`复制待付链接（网站批次 ${order.value?.code ?? '-'}，客户 ${order.value?.client ?? '-'}）`, unpaid.value)
+}
 const left = computed(() => Math.max(0, n(order.value?.due_amount) - n(order.value?.settled_amount)))
 const pct = computed(() => Math.min(100, Math.round((n(order.value?.paid) / Math.max(1, n(order.value?.quantity))) * 100)))
 
@@ -232,7 +239,7 @@ async function changeQty(): Promise<void> {
 
         <a-card size="small" :title="`链接（${links.length}）`">
           <template #extra>
-            <a-button size="small" :disabled="!unpaid.length" @click="copyText(unpaid.map((l) => l.url).join('\n'), `已复制待付的 ${unpaid.length} 条`)">
+            <a-button size="small" :disabled="!unpaid.length" @click="copyUnpaid">
               复制待付的 {{ unpaid.length }} 条
             </a-button>
           </template>

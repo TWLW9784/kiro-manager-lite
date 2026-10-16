@@ -16,6 +16,7 @@ import RegionSelect from '@/components/common/RegionSelect.vue'
 import { useKeysStore } from '@/stores/keys'
 import { useSettingsStore } from '@/stores/settings'
 import { copyText } from '@/utils/ui'
+import { auditExport, keyBrief } from '@/utils/audit'
 import {
   displayEmail as maskedEmail,
   displayNote as maskedNote,
@@ -133,7 +134,9 @@ async function sync(): Promise<void> {
 
 function copyKey(): void {
   const target = entry.value
-  if (target) copyText(target.key, '完整 API Key 已复制')
+  if (!target) return
+  copyText(target.key, '完整 API Key 已复制')
+  auditExport('复制 API Key（详情）', [target], { detail: keyBrief })
 }
 
 /** 复制的始终是完整原值，与界面是否打码无关 */
@@ -151,8 +154,10 @@ async function exportKey(): Promise<void> {
   const target = entry.value
   if (!target) return
   const result = await window.api.exportToFile(target.key + '\n', `kiro-api-key-${target.id}.txt`)
-  if (!result.success) message.error(result.error || '导出失败')
-  else if (result.data?.saved) message.success('已导出')
+  if (!result.success) return void message.error(result.error || '导出失败')
+  if (!result.data?.saved) return
+  auditExport('导出 API Key（详情）', [target], { to: result.data.path, detail: keyBrief })
+  message.success('已导出')
 }
 
 function subscriptionColor(tier?: string): string {

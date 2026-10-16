@@ -18,6 +18,7 @@ import { useBatchRun, type BatchRow } from '@/utils/batchRun'
 import { displayEmail } from '@/utils/display'
 import { toPlain } from '@/utils/ipc'
 import { confirmDanger, copyText } from '@/utils/ui'
+import { auditExport, keyBrief } from '@/utils/audit'
 import { applyRefreshedCredentials, randomKeyName } from '@/utils/accountApiKey'
 import type { Account } from '@shared/types'
 
@@ -76,14 +77,22 @@ function displayKey(key: string): string {
   return `${key.slice(0, 8)}…${key.slice(-6)}`
 }
 
+/** 记录里用的形状：邮箱 + Key（只记前后几位）+ 区域 */
+function keyItem(row: Row): { email: string; key: string; region?: string } {
+  return { email: row.account.email, key: row.apiKey ?? '', region: row.region }
+}
+
 function copyOne(row: Row): void {
-  if (row.apiKey) copyText(row.apiKey, '已复制 API Key')
+  if (!row.apiKey) return
+  copyText(row.apiKey, '已复制 API Key')
+  auditExport('复制新生成的 API Key（批量生成）', [keyItem(row)], { detail: keyBrief })
 }
 
 /** 复制全部：一行一个，可直接粘到 API Key 管理的批量导入里 */
 function copyAll(): void {
   if (!created.value.length) return
   copyText(importText.value, `已复制 ${created.value.length} 个 API Key`)
+  auditExport('复制新生成的 API Key（批量生成，全部）', created.value.map(keyItem), { detail: keyBrief, unit: '个 API Key' })
   saved.value = true
 }
 

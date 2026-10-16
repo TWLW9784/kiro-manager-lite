@@ -21,6 +21,8 @@ import {
 import { useAccountsStore } from '@/stores/accounts'
 import { freshAccount as ensureFreshAccount } from '@/utils/freshAccount'
 import { copyText } from '@/utils/ui'
+import { auditExport } from '@/utils/audit'
+import { paymentLinkBrief } from '@/utils/paymentLinks'
 import { toPlain } from '@/utils/ipc'
 import { priceFields } from '@/utils/paymentLinkExtract'
 import { errorMessage } from '@shared/errors'
@@ -165,6 +167,12 @@ async function copyCheckout(plan: SubscriptionPlan): Promise<void> {
   const url = await checkoutUrl(plan, 'copy')
   if (!url) return
   copyText(url, '支付链接已复制到剪贴板')
+  // 结算链接刚记成支付链接标记，记录里带上档位与金额；已订阅的账号拿到的是账单管理页，只记档位
+  const account = accountsStore.get(props.account.id) ?? props.account
+  const fresh = account.paymentLink?.url === url
+  auditExport(`复制${fresh ? '支付链接' : '账单管理链接'}（订阅弹窗，${plan.title}）`, [account], {
+    detail: fresh ? paymentLinkBrief : undefined
+  })
 }
 </script>
 

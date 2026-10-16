@@ -24,6 +24,7 @@ import {
 import { displayEmail, displayNote } from '@/utils/display'
 import { toPlain } from '@/utils/ipc'
 import { copyText, notifyResult } from '@/utils/ui'
+import { accountBrief, auditExport } from '@/utils/audit'
 import { regionLabel } from '@shared/regions'
 import type { Account } from '@shared/types'
 
@@ -80,6 +81,8 @@ function mask(value?: string): string {
 function copy(label: string, value?: string): void {
   if (!value) return void message.warning(`${label} 为空`)
   copyText(value, `${label} 已复制`)
+  // 复制的是凭证字段，和导出一样记下来
+  if (account.value) auditExport(`复制 ${label}（账号详情）`, [account.value], { detail: (a) => accountBrief(a, accountsStore.groups) })
 }
 
 /** 凭证区展示的字段，顺序即界面顺序 */

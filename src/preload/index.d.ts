@@ -289,6 +289,8 @@ export interface Api {
   writeClipboard: (text: string) => void
   /** 渲染层写一条日志到日志中心（渲染进程的 console 不会自动进去） */
   writeLog: (level: LogLevel, message: string) => Promise<IpcResult>
+  /** 操作记录（导出 / 导入 / 复制凭证）：进日志中心，另外永久留存，不随系统日志轮换 */
+  writeAuditLog: (lines: { level: LogLevel; message: string }[]) => Promise<IpcResult>
   /** 剪贴板监听：开始后每次复制新内容都会通过 onClipboardChanged 推过来 */
   startClipboardWatch: () => Promise<IpcResult>
   stopClipboardWatch: () => Promise<IpcResult>

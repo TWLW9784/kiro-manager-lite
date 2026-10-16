@@ -164,7 +164,8 @@ function openLogDir(): void {
 function clearAll(): void {
   confirmDanger({
     title: '清空系统日志',
-    content: '会同时删除磁盘上已归档的日志分片，操作不可撤销。',
+    content:
+      '会同时删除磁盘上已归档的日志分片，操作不可撤销。导入 / 导出 / 删除 / 分配这类操作记录不会删，清空后仍能按邮箱查到。',
     okText: '清空',
     onOk: async () => {
       const res = await window.api.clearLogs()
@@ -204,7 +205,7 @@ onUnmounted(() => {
       <a-input
         v-model:value="keyword"
         allow-clear
-        placeholder="按消息、分类搜索…"
+        placeholder="按邮箱、消息、分类搜索…"
         class="search-input"
       >
         <template #prefix><SearchOutlined /></template>

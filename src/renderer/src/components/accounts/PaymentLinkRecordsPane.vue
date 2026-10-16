@@ -48,6 +48,7 @@ import {
   localDueText,
   buildPaymentLinkSheet,
   displayPaymentUrl,
+  paymentLinkBrief,
   paymentLinkFilename,
   paymentLinkText
 } from '@/utils/paymentLinks'
@@ -481,6 +482,11 @@ async function copyLinks(): Promise<void> {
     if (!list.length) return void message.info('没有还能付款的链接，可以先「重新提取」失效的')
     const skipped = dropped ? `，已跳过失效 / 已付款的 ${dropped} 条` : ''
     copyText(paymentLinkText(list), `已复制 ${list.length} 条支付链接${skipped}`)
+    auditExport('复制支付链接（提取记录，只含能付款的）', list, {
+      detail: paymentLinkBrief,
+      unit: '条支付链接',
+      note: dropped ? `跳过失效 / 已付款的 ${dropped} 条` : undefined
+    })
     accountsStore.markPaymentLinksExported(list)
   } finally {
     preparing.value = false
@@ -511,9 +517,13 @@ async function exportXlsx(payable: boolean): Promise<void> {
     const res = await window.api.exportToXlsx(toPlain(sheet), paymentLinkFilename())
     if (!res.success) return void message.error(res.error || '导出失败')
     if (res.data?.saved) {
+      auditExport(`导出支付链接 Excel（提取记录，${payable ? '只含能付款的' : '全部'}）`, list, {
+        to: res.data.path,
+        detail: paymentLinkBrief,
+        unit: '条支付链接'
+      })
       // 发出去的链接不再推到网站（除非之后手动分配给客户）
       accountsStore.markPaymentLinksExported(list)
-      auditExport(`导出支付链接 Excel → ${res.data.path ?? ""}`, list.map((a) => a.email))
       message.success(`已导出 ${sheet.rows.length} 条支付链接`)
     }
   } finally {
@@ -552,7 +562,9 @@ function clearPaid(): void {
 }
 
 function copyOne(account: Account): void {
-  if (account.paymentLink) copyText(account.paymentLink.url, '支付链接已复制')
+  if (!account.paymentLink) return
+  copyText(account.paymentLink.url, '支付链接已复制')
+  auditExport('复制支付链接（提取记录）', [account], { detail: paymentLinkBrief })
 }
 
 async function openOne(account: Account): Promise<void> {

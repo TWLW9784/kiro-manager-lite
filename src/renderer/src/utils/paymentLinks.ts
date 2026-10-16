@@ -4,9 +4,10 @@
 // Excel 前三列与复制出来的每一行都是这个顺序，其余信息排在后面。
 import { isAwaitingKiroSync, paymentLinkState, paymentLinkTier } from '@shared/paymentLink'
 import type { Account, AccountGroup, XlsxSheet } from '@shared/types'
-import { PAYMENT_LINK_META, formatLocal, formatPrice, formatUsd, subscriptionLabel } from './format'
+import { PAYMENT_LINK_META, formatFullDateTime, formatLocal, formatPrice, formatUsd, subscriptionLabel } from './format'
 import { exportStamp } from './transfer'
 import { linkCny } from './paymentLinkExtract'
+import { shortLink } from './paylinksAdmin'
 
 /** 付款状态文案：Stripe 已付、Kiro 还没同步的单独标出来 */
 export function paymentStateText(account: Account, nowMs = Date.now()): string {
@@ -24,6 +25,26 @@ export function amountDueText(link: NonNullable<Account['paymentLink']>): string
 export function localDueText(link: NonNullable<Account['paymentLink']>): string {
   const cny = linkCny(link)
   return cny === undefined ? '' : formatLocal(cny, 'CNY')
+}
+
+/**
+ * 操作记录里一条支付链接当时的状态：档位｜应付｜付款状态｜提取时间｜会话号缩写｜以前发给过谁。
+ * 链接只记缩写（cs_live_a1b2…z9），够和 Excel / 网站上的对上，整条太长
+ */
+export function paymentLinkBrief(account: Account): string {
+  const link = account.paymentLink
+  if (!link) return '没有支付链接'
+  const cny = localDueText(link)
+  const parts = [
+    paymentLinkTier(link),
+    `${amountDueText(link)}${cny ? `（${cny}）` : ''}`,
+    paymentStateText(account),
+    `提取于 ${formatFullDateTime(link.createdAt)}`,
+    shortLink(link.url)
+  ]
+  if (link.assignedOrderCode) parts.push(`已在网站批次 ${link.assignedOrderCode}`)
+  else if (link.exportedAt) parts.push(`此前 ${formatFullDateTime(link.exportedAt)} 已发出${link.exportedTo ? `给 ${link.exportedTo}` : ''}`)
+  return parts.join('｜')
 }
 
 /**

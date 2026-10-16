@@ -27,7 +27,7 @@ import { paymentLinkState, type PaymentLinkState } from '@shared/paymentLink'
 import { DEFAULT_REGION } from '@shared/regions'
 import { runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
-import { auditEmails } from '@/utils/audit'
+import { auditEmails, auditLines } from '@/utils/audit'
 import { toPlain } from '@/utils/ipc'
 import { isSocialIdp, normalizeIdp } from '@/utils/transfer'
 import { useSettingsStore } from './settings'
@@ -833,9 +833,11 @@ export const useAccountsStore = defineStore('accounts', () => {
       `${label}结束：成功 ${result.success}，跳过 ${result.skipped}，失败 ${result.failed}；新增账号如下`,
       created.map((a) => a.email)
     )
-    for (const line of result.messages) {
-      void window.api.writeLog(/校验失败|异常/.test(line) ? 'warn' : 'info', `[Import] ${line}`)
-    }
+    // 跳过 / 失败的原因同样永久留存：事后查「这个号为什么没导进来」
+    auditLines(
+      'Import',
+      result.messages.map((text) => ({ level: /校验失败|异常/.test(text) ? 'warn' : 'info', text }))
+    )
   }
 
   /**

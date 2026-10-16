@@ -51,7 +51,7 @@ import { displayEmail as maskedEmail } from '@/utils/display'
 import { accountGroupApi } from '@/utils/groupApi'
 import { toPlain } from '@/utils/ipc'
 import { buildExportContent } from '@/utils/transfer'
-import { auditExport } from '@/utils/audit'
+import { accountBrief, auditExport } from '@/utils/audit'
 import {
   bodyPopupContainer,
   confirmDanger,
@@ -407,7 +407,7 @@ function copyToken(account: Account): void {
     groups: accountsStore.groups
   })
   copyText(content, '凭证 JSON 已复制到剪贴板')
-  auditExport('复制凭证 JSON（卡片）', [account.email])
+  auditExport('复制凭证 JSON（账号卡片，含凭证）', [account], { detail: (a) => accountBrief(a, accountsStore.groups) })
 }
 
 const switchResult = ref<SwitchAccountResult | null>(null)

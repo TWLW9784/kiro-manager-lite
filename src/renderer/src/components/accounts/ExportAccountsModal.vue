@@ -22,7 +22,7 @@ import {
   exportFilename,
   type ExportFormat
 } from '@/utils/transfer'
-import { auditExport } from '@/utils/audit'
+import { accountBrief, auditExport } from '@/utils/audit'
 import { toPlain } from '@/utils/ipc'
 import { copyText } from '@/utils/ui'
 import type { ExportBundle } from '@shared/types'
@@ -145,14 +145,18 @@ function exportLabel(how: string): string {
   return `${how}（${name}，${effectiveCredentials.value ? '含凭证' : '不含凭证'}）`
 }
 
+/** 逐个记下导出时的状态，搜邮箱就能查到它什么时候、以什么格式、导到了哪个文件 */
 function logExport(how: string, path?: string): void {
-  auditExport(`${exportLabel(how)}${path ? ` → ${path}` : ''}`, targets.value.map((a) => a.email))
+  auditExport(exportLabel(how), targets.value, {
+    to: path,
+    detail: (a) => accountBrief(a, accountsStore.groups)
+  })
 }
 
 function copy(): void {
   if (targets.value.length === 0) return void message.warning('没有可导出的账号')
   copyText(content(), `已复制 ${targets.value.length} 个账号到剪贴板`)
-  logExport('复制到剪贴板')
+  logExport('复制账号')
   close()
 }
 

@@ -114,7 +114,7 @@ import {
 } from './proxyClients'
 import { clearCustomPath, pickDialogOptions, resetInstallCache, saveCustomPath } from './proxyClientInstall'
 import { FALLBACK_MODEL_IDS } from '../shared/proxyModels'
-import { clearLogs, exportLogs, getLogDir, log, queryLogs } from './logger'
+import { clearLogs, exportLogs, flushAuditSync, getLogDir, log, logAudit, queryLogs } from './logger'
 import { kiroCliEnvStatus, kiroCliEnvWritten, removeKiroCliEnv, writeKiroCliEnv } from './kiroCliEnv'
 import { buildXlsx, buildZip } from './xlsxWriter'
 import {
@@ -167,6 +167,7 @@ import {
   pruneUsageHistory
 } from './usageHistory'
 import { DEFAULT_REGION } from '../shared/regions'
+import { LOG_LEVELS } from '../shared/types'
 import type {
   Account,
   AccountGroup,
@@ -236,14 +237,15 @@ function keepHistoryIds(accountIds: string[]): string[] {
 }
 
 /**
- * 写一条带邮箱清单的操作日志：先一条总览，再每 20 个邮箱一条。
- * 导入 / 导出 / 删除 / 恢复这类事后要回查「动了哪些号」的操作都走这里，搜邮箱就能找到。
+ * 写一条带邮箱清单的操作记录：先一条总览，再每 20 个邮箱一条。
+ * 导入 / 导出 / 删除 / 恢复这类事后要回查「动了哪些号」的操作都走这里，搜邮箱就能找到；
+ * 走 logAudit 永久留存，不随系统日志轮换
  */
 export function auditEmails(level: LogLevel, category: string, summary: string, emails: string[]): void {
-  log(level, `[${category}] ${summary}`)
+  logAudit(level, `[${category}] ${summary}`)
   for (let i = 0; i < emails.length; i += 20) {
     const part = emails.slice(i, i + 20)
-    log(level, `[${category}] ${i + 1}-${i + part.length}：${part.join('、')}`)
+    logAudit(level, `[${category}] ${i + 1}-${i + part.length}：${part.join('、')}`)
   }
 }
 
@@ -703,6 +705,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     return ok()
   })
 
+  /** 渲染层的操作记录（导出 / 导入 / 复制凭证），一批一次 IPC，永久留存 */
+  handle('log:audit', (_e, lines: { level: LogLevel; message: string }[]) => {
+    for (const line of Array.isArray(lines) ? lines : []) {
+      if (!line || typeof line.message !== 'string') continue
+      logAudit(LOG_LEVELS.includes(line.level) ? line.level : 'info', line.message)
+    }
+    return ok()
+  })
+
   // 剪贴板监听：「粘贴文本导入」里连续收集聊天记录里的 JSON
   handle('clipboard:watch-start', (event) => {
     startClipboardWatch(event.sender)
@@ -1017,6 +1028,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
    * 所以开发时只退出，提示重新 npm run dev；打包后界面是本地文件，照常重启。
    */
   function relaunchNow(): void {
+    // app.exit 不走 will-quit，操作记录得先同步写下去
+    flushAuditSync()
     if (!app.isPackaged) {
       dialog.showMessageBoxSync({
         type: 'info',
@@ -1044,7 +1057,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     const file = extname(result.filePath).toLowerCase() === '.json' ? result.filePath : `${result.filePath}.json`
     await writeFile(file, buildBackup(), 'utf8')
     revealExported(file)
-    log('info', `[Backup] 已导出数据：${file}`)
+    // 整机数据里是全部账号的凭证，和导出账号一样记清楚带走了哪些号
+    const emails = viewAccountData().accounts.map((account) => account.email)
+    auditEmails('info', 'Backup', `导出全部数据（含凭证）→ ${file}：${emails.length} 个账号`, emails)
     return ok({ saved: true, path: file })
   })
 
@@ -1053,6 +1068,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
    * 解析结果暂存在主进程，渲染层传不进任意内容。
    */
   let pendingImport: ReturnType<typeof parseBackup> | null = null
+  let pendingImportFile = ''
   handle('data:import-pick', async () => {
     const result = await dialog.showOpenDialog(getWindow()!, {
       title: '导入数据',
@@ -1064,6 +1080,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     // 对话框的过滤在部分平台可以被「所有文件」绕过，这里再卡一次后缀
     if (extname(file).toLowerCase() !== '.json') return fail(new Error('只支持导入 .json 数据文件'))
     pendingImport = parseBackup(await readFile(file, 'utf8'))
+    pendingImportFile = file
     return ok({ file, ...summarizeBackup(pendingImport) })
   })
 
@@ -1072,7 +1089,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     if (!pendingImport) return fail(new Error('请先选择要导入的备份文件'))
     const file = pendingImport
     pendingImport = null
-    log('info', '[Backup] 导入数据，应用将重启')
+    const imported = file.sections.accounts?.accounts
+    const emails = Array.isArray(imported) ? imported.map((account) => String(account?.email ?? '')) : []
+    auditEmails(
+      'info',
+      'Backup',
+      `导入全部数据 ← ${pendingImportFile}（${emails.length ? `覆盖本机账号，共 ${emails.length} 个` : '文件里不含账号'}），应用将重启`,
+      emails
+    )
     stopServicesForRelaunch()
     applyBackup(file)
     relaunchNow()
@@ -1123,7 +1147,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null): void {
     if (kiroCliEnvWritten() || process.platform !== 'win32') {
       await removeKiroCliEnv().catch((e) => log('warn', `[Backup] 移除 KIRO_API_KEY 失败：${errorMessage(e)}`))
     }
-    await clearLogs()
+    // 回到刚安装的状态：操作记录也一起删
+    await clearLogs({ audit: true })
     await clearRendererStorage().catch(() => undefined)
     stopServicesForRelaunch()
     wipeLocalData()

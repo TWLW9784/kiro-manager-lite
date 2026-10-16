@@ -34,6 +34,8 @@ import {
 import { displayEmail, displayName, displayNote } from '@/utils/display'
 import { now } from '@/utils/now'
 import { copyText } from '@/utils/ui'
+import { auditExport } from '@/utils/audit'
+import { paymentLinkBrief } from '@/utils/paymentLinks'
 import { isAwaitingKiroSync, paymentLinkState } from '@shared/paymentLink'
 import type { Account, AccountDisplayMode } from '@shared/types'
 
@@ -149,7 +151,9 @@ const payment = computed(() => {
 
 function copyPaymentLink(): void {
   const url = props.account.paymentLink?.url
-  if (url) copyText(url, '支付链接已复制到剪贴板')
+  if (!url) return
+  copyText(url, '支付链接已复制到剪贴板')
+  auditExport('复制支付链接（账号卡片）', [props.account], { detail: paymentLinkBrief })
 }
 
 /** 订阅到期时间：优先订阅字段，回退到用量重置日期 */

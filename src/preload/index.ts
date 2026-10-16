@@ -165,6 +165,8 @@ const api = {
   writeClipboard: (text: string) => clipboard.writeText(text),
   /** 渲染层写一条日志到日志中心（渲染进程的 console 不会自动进去） */
   writeLog: (level: string, message: string) => invoke('log:write', level, message),
+  /** 操作记录：进日志中心，另外永久留存 */
+  writeAuditLog: (lines: { level: string; message: string }[]) => invoke('log:audit', lines),
   /** 剪贴板监听：开始后每次复制新内容都会推过来，用完记得 stop */
   startClipboardWatch: () => invoke('clipboard:watch-start'),
   stopClipboardWatch: () => invoke('clipboard:watch-stop'),
