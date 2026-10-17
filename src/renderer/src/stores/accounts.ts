@@ -25,6 +25,7 @@ import { errorMessage, isCredentialRejected } from '@shared/errors'
 import { shouldSkipAccountUsageRefresh } from '@shared/refreshPolicy'
 import { paymentLinkState, type PaymentLinkState } from '@shared/paymentLink'
 import { DEFAULT_REGION } from '@shared/regions'
+import { alignedSubscriptionType } from '@shared/subscription'
 import { runPool } from '@/utils/format'
 import { UNGROUPED } from '@/utils/groups'
 import { auditEmails, auditLines } from '@/utils/audit'
@@ -920,6 +921,11 @@ export const useAccountsStore = defineStore('accounts', () => {
         ? groupIdMap.get(raw.groupId) ?? (groupMap.value.has(raw.groupId) ? raw.groupId : undefined)
         : undefined
       const { groupId: _dropGroupId, ...restRaw } = raw
+      // 档位按 title 重算：别的版本导出的 type 可能和 title 对不上（1.7.5 把 PRO MAX 存成 Pro），
+      // 不重算的话卡片写着 PRO MAX，颜色、筛选、统计却按 Pro 算
+      const subscription = raw.subscription
+        ? { ...raw.subscription, type: alignedSubscriptionType(raw.subscription) }
+        : { type: 'Free' as const }
       created.push({
         ...restRaw,
         ...(mappedGroupId ? { groupId: mappedGroupId } : {}),
@@ -927,7 +933,7 @@ export const useAccountsStore = defineStore('accounts', () => {
         idp,
         isActive: false,
         usage: raw.usage ?? emptyUsage(),
-        subscription: raw.subscription ?? { type: 'Free' },
+        subscription,
         status: raw.status ?? 'unknown',
         createdAt: baseTime + (total - i),
         lastUsedAt: raw.lastUsedAt ?? baseTime

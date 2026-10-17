@@ -25,3 +25,16 @@ export function normalizeSubscriptionType(title: string): SubscriptionType {
   if (t.includes('PRO')) return 'Pro'
   return 'Free'
 }
+
+/** 当前有效的订阅档位；磁盘上、别的版本导出的文件里可能留着已废弃的值 */
+const VALID_TYPES = new Set<string>(['Free', 'Pro', 'Pro_Plus', 'Pro_Max', 'Power', 'Teams', 'Student'] satisfies SubscriptionType[])
+
+/**
+ * 订阅档位以 title 为准：type 是从 title 派生的持久化值。
+ * 别的版本 / 别的管理器导出的文件里 type 可能和 title 对不上（如 1.7.5 把 KIRO PRO MAX 存成 Pro），
+ * 读盘和恢复备份时都按 title 重算。title 缺失时无判据，只把已废弃的档位归到 Free，其余保持原值
+ */
+export function alignedSubscriptionType(sub: { type: string; title?: string }): SubscriptionType {
+  if (sub.title) return normalizeSubscriptionType(sub.title)
+  return VALID_TYPES.has(sub.type) ? (sub.type as SubscriptionType) : 'Free'
+}

@@ -18,10 +18,9 @@ import {
   type ProxyApiKey,
   type ProxyConfig,
   type ProxyKeyUsage,
-  type ProxyModelCache,
-  type SubscriptionType
+  type ProxyModelCache
 } from '../shared/types'
-import { normalizeSubscriptionType } from '../shared/subscription'
+import { alignedSubscriptionType } from '../shared/subscription'
 
 /** permissions.yaml 开启前的原始状态 */
 export interface ShellApproveYamlBackup {
@@ -371,17 +370,6 @@ export function setShellApproveBackup(backup: ShellApproveBackup | null): void {
   write('shellApproveBackup', backup)
 }
 
-/** 当前有效的订阅档位，用于识别磁盘上遗留的废弃值 */
-const VALID_SUBSCRIPTION_TYPES = new Set<string>([
-  'Free',
-  'Pro',
-  'Pro_Plus',
-  'Pro_Max',
-  'Power',
-  'Teams',
-  'Student'
-] satisfies SubscriptionType[])
-
 /**
  * 按 title 重新对齐订阅档位，就地改写并落盘。
  *
@@ -398,13 +386,7 @@ function alignSubscriptionTypes(data: AccountStoreData): AccountStoreData {
   for (const account of data.accounts) {
     const sub = account.subscription
     if (!sub) continue
-    if (!sub.title) {
-      if (VALID_SUBSCRIPTION_TYPES.has(sub.type)) continue
-      sub.type = 'Free'
-      changed = true
-      continue
-    }
-    const next = normalizeSubscriptionType(sub.title)
+    const next = alignedSubscriptionType(sub)
     if (next === sub.type) continue
     sub.type = next
     changed = true
