@@ -38,6 +38,7 @@ import BatchCreateApiKeyModal from '@/components/accounts/BatchCreateApiKeyModal
 import SortMenu from '@/components/common/SortMenu.vue'
 import { useRangeSelect } from '@/utils/rangeSelect'
 import { DEFAULT_SORT, SORT_FIELDS, compareBy, type SortField, type SortKey } from '@/utils/listSort'
+import { paymentLinkState } from '@shared/paymentLink'
 import DisplayModeSelect from '@/components/common/DisplayModeSelect.vue'
 import AccountDetailDrawer from '@/components/accounts/AccountDetailDrawer.vue'
 import AccountTestModal from '@/components/accounts/AccountTestModal.vue'
@@ -252,12 +253,31 @@ function accountSortValue(account: Account, field: SortField): number | string |
   return account.createdAt || 0
 }
 
+/**
+ * 刚开通、还没分组的号的开通时间；不是这种号返回 0。
+ *
+ * 「已开通」与卡片上的标签同一口径（支付链接状态 paid，含 Stripe 已付、Kiro 待同步）。
+ * 开通后通常就分进组里交付了，所以「已开通但未分组」就是刚开通、还没处理的那几个，
+ * 不按时间窗口卡；分了组自然回到原来的位置。
+ * 开通时间取 Stripe 确认已付的时刻（只在变成已付那一下写，之后不再查，不会乱跳），缺了退回提取时间
+ */
+function freshPaidAt(account: Account): number {
+  const link = account.paymentLink
+  if (!link || paymentLinkState(account) !== 'paid') return 0
+  if (account.groupId && accountsStore.groupMap.has(account.groupId)) return 0
+  return (link.stripeStatus === 'complete' && link.stripeCheckedAt) || link.createdAt || 1
+}
+
 const sorted = computed(() => {
   const compare = compareBy(sortKey.value, accountSortValue, (a: Account) => a.createdAt || 0)
-  // IDE 当前账号始终置顶，其余按所选排序
-  return [...accountsStore.filtered].sort(
-    (a, b) => Number(b.isActive) - Number(a.isActive) || compare(a, b)
-  )
+  const fresh = new Map(accountsStore.filtered.map((a) => [a.id, freshPaidAt(a)]))
+  // 刚开通且未分组的排最前（新开通的在上），其次 IDE 当前账号，其余按所选排序
+  return [...accountsStore.filtered].sort((a, b) => {
+    const fa = fresh.get(a.id)!
+    const fb = fresh.get(b.id)!
+    if (fa || fb) return fb - fa || compare(a, b)
+    return Number(b.isActive) - Number(a.isActive) || compare(a, b)
+  })
 })
 
 /** 网格数据：账号卡片 + 末尾一张「添加账号」卡 */
